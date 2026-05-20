@@ -1929,30 +1929,33 @@ function renderDiscoveredAccounts(c) {
     </div>`;
   }
 
-  // Manual verification links for all known misinfo accounts
+  // Manual verification section — always visible
   const manualLinks = inv.manual_links || {};
   const mEntries = Object.entries(manualLinks).filter(([,v])=>v.type==='misinfo');
+  const ocrKeywords = inv.ocr_keywords || [];
+
   if (mEntries.length) {
-    html += `<details style="margin-top:16px">
-      <summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--text2);padding:8px 0;border-top:1px solid var(--border);user-select:none">
-        ▸ Also check these known misinformation accounts manually (${mEntries.length} accounts)
-      </summary>
-      <div style="margin-top:10px;font-size:11px;color:var(--text2);margin-bottom:8px">
-        These accounts were proactively checked with perceptual hashing. Click links for manual verification:
+    html += `<div style="margin-top:20px;border-top:1px solid var(--border);padding-top:14px">
+      <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px">Verify against known misinformation accounts</div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:10px">
+        These accounts are in the known misinformation database. Even if not detected automatically,
+        manually check their recent media for this content.
+        ${ocrKeywords.length ? `<br><strong>OCR detected in image:</strong> ${ocrKeywords.map(k=>`<code style="background:var(--bg3);padding:1px 5px;border-radius:3px;font-size:11px">${escHtml(k)}</code>`).join(' ')}` : ''}
       </div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px">`;
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">`;
     for (const [username, info] of mEntries) {
-      const wasChecked = inv.proactive_checked > 0;
-      html += `<div style="background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:6px 10px;font-size:11px;min-width:140px">
-        <div style="font-weight:600;color:var(--critical);margin-bottom:2px">⚠ @${escHtml(username)}</div>
-        <div style="color:var(--text2);font-size:10px;margin-bottom:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(info.note||'')}">${escHtml((info.note||'').slice(0,40))}</div>
-        <div style="display:flex;gap:5px">
+      // Highlight accounts where OCR keywords matched (they'd be in confirmed_matches)
+      const wasMatched = accounts.some(a => a.username?.toLowerCase() === username && a.match_method?.includes('ocr'));
+      html += `<div style="background:var(--bg3);border:1px solid ${wasMatched?'var(--critical)':'var(--border)'};border-radius:6px;padding:8px 10px">
+        <div style="font-weight:600;color:var(--critical);margin-bottom:3px;font-size:12px">@${escHtml(username)}</div>
+        <div style="color:var(--text2);font-size:10px;margin-bottom:6px;line-height:1.4">${escHtml((info.note||'').slice(0,55))}</div>
+        <div style="display:flex;gap:5px;flex-wrap:wrap">
           <a href="${escHtml(info.twitter_media)}" target="_blank" class="media-link" style="font-size:10px">Media tab ↗</a>
           <a href="${escHtml(info.google_images)}" target="_blank" class="media-link" style="font-size:10px">Google ↗</a>
         </div>
       </div>`;
     }
-    html += `</div></details>`;
+    html += `</div></div>`;
   }
 
   return html;

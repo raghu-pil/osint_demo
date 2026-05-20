@@ -396,6 +396,109 @@ def _phash_distance(path_or_url_a: str, img_bytes_b: bytes) -> Optional[int]:
         return None
 
 
+def extract_image_keywords(file_path: str) -> List[str]:
+    """
+    Extract distinctive text/watermarks from an image using OCR.
+    Returns a list of meaningful tokens (news org names, watermarks, etc.)
+    """
+    keywords = []
+    # Common Indian and international news watermarks to specifically look for
+    KNOWN_WATERMARKS = [
+        "IANS", "ANI", "PTI", "AFP", "Reuters", "AP ",
+        "ABP", "TV9", "NDTV", "Zee News", "India Today",
+        "Aaj Tak", "Republic", "Times Now", "Lokmat",
+        "Doordarshan", "DD News", "ETV", "News18",
+        "Geo News", "ARY", "Dawn", "SAMAA",
+        "BBC", "CNN", "Al Jazeera", "RT ",
+    ]
+    try:
+        import pytesseract
+        from PIL import Image
+        img = Image.open(file_path)
+        text = pytesseract.image_to_string(img, config="--psm 11")
+        # Check for known watermarks
+        for wm in KNOWN_WATERMARKS:
+            if wm.strip().lower() in text.lower():
+                keywords.append(wm.strip())
+        # Also grab any short ALL-CAPS words (often station callsigns / org names)
+        caps_words = re.findall(r'\b[A-Z]{2,8}\b', text)
+        for w in caps_words:
+            if w not in keywords and w not in ("THE", "AND", "FOR", "BUT", "ARE", "WAS"):
+                keywords.append(w)
+        logger.info("OCR extracted keywords: %s", keywords[:10])
+    except Exception as e:
+        logger.debug("OCR failed: %s", e)
+    return keywords[:8]
+
+
+def ocr_text_search_known_accounts(
+    file_path: str,
+    api_key: str,
+    max_accounts: int = 5,
+) -> List[Dict]:
+    """
+    Extract text/watermarks from image via OCR, then search for that text
+    on each known misinfo account using Google.  Works even for recent tweets
+    not yet indexed by visual search.
+    """
+    if not api_key:
+        return []
+
+    keywords = extract_image_keywords(file_path)
+    if not keywords:
+        logger.info("OCR found no distinctive keywords — skipping text-based search")
+        return []
+
+    search_text = " ".join(keywords[:4])
+    logger.info("OCR text search using keywords: %s", search_text)
+
+    from backend.modules.known_accounts import MISINFO_ACCOUNTS
+    matches = []
+
+    for username, meta in list(MISINFO_ACCOUNTS.items())[:max_accounts]:
+        try:
+            from serpapi import GoogleSearch
+            q = f'(site:twitter.com/{username} OR site:x.com/{username}) {search_text}'
+            res = GoogleSearch({
+                "engine": "google",
+                "q": q,
+                "api_key": api_key,
+                "num": 5,
+            }).get_dict()
+
+            organic = res.get("organic_results", [])
+            for item in organic[:3]:
+                link = item.get("link", "")
+                if "twitter.com" in link or "x.com" in link:
+                    matches.append({
+                        "username": username,
+                        "platform": "twitter",
+                        "account_url": f"https://twitter.com/{username}",
+                        "post_url": link,
+                        "known_type": "misinfo",
+                        "known_note": meta.get("note", ""),
+                        "region": meta.get("region", ""),
+                        "match_title": item.get("title", ""),
+                        "match_snippet": item.get("snippet", ""),
+                        "match_method": "ocr_text_search",
+                        "ocr_keywords": keywords,
+                        "severity_score": 90,
+                        "severity_label": "CRITICAL",
+                        "score_reasons": [
+                            f"OCR text match on known misinfo account @{username}",
+                            f"Keywords found: {', '.join(keywords[:4])}",
+                            f"Known misinfo: {meta.get('note','')}",
+                        ],
+                    })
+                    break  # one match per account is enough
+            time.sleep(0.2)
+        except Exception as e:
+            logger.debug("OCR text search failed for @%s: %s", username, e)
+
+    logger.info("OCR text search complete: %d matches found", len(matches))
+    return matches
+
+
 def proactive_known_account_check(
     file_path: str,
     public_url: str,
@@ -504,9 +607,25 @@ def proactive_known_account_check(
             logger.warning("Proactive check failed for @%s: %s", username, e)
             result["errors"].append(f"@{username}: {e}")
 
+    # Second pass: OCR-based text search for accounts not caught by phash
+    # This finds recent tweets not yet indexed visually (e.g. just-posted content)
+    ocr_matches = ocr_text_search_known_accounts(file_path, api_key, max_accounts=max_accounts)
+    confirmed_usernames = {m["username"].lower() for m in result["confirmed_matches"]}
+    for match in ocr_matches:
+        uname = match.get("username", "").lower()
+        if uname not in confirmed_usernames:
+            result["confirmed_matches"].append(match)
+            confirmed_usernames.add(uname)
+            logger.info("OCR text search matched @%s", uname)
+
+    result["ocr_keywords"] = extract_image_keywords(file_path)
+
     logger.info(
-        "Proactive check complete: %d matches, %d checked, %d accounts with manual links",
-        len(result["confirmed_matches"]), len(result["checked"]), len(result["manual_links"])
+        "Proactive check complete: %d matches (%d via phash, %d via OCR), %d accounts with manual links",
+        len(result["confirmed_matches"]),
+        len(result["confirmed_matches"]) - len(ocr_matches),
+        len(ocr_matches),
+        len(result["manual_links"])
     )
     return result
 

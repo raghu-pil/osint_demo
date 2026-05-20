@@ -284,6 +284,7 @@ def _run_media_pipeline(case_id: str, manager: CaseManager):
             "proactive_matches": n_proactive,
             "proactive_checked": len(proactive.get("checked", [])),
             "manual_links": proactive.get("manual_links", {}),
+            "ocr_keywords": proactive.get("ocr_keywords", []),
         }
         discovered = list(inv.get("discovered_accounts", []))
 

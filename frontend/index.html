@@ -699,38 +699,146 @@ function renderTimeline(c) {
       </div>`).join('')}`;
 }
 
+// ── Reverse search state ──────────────────────────────────────────────────────
+const _rsResults = {};   // caseId+filename+ts -> result
+
+async function loadKeyframes(caseId, filename, containerId) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = '<div style="color:var(--text2);font-size:12px">Extracting keyframes…</div>';
+  try {
+    const r = await fetch(`/api/cases/${caseId}/keyframes/${encodeURIComponent(filename)}`);
+    const data = await r.json();
+    if (!data.frames?.length) { el.innerHTML = '<div style="color:var(--text2);font-size:12px">No keyframes extracted.</div>'; return; }
+    el.innerHTML = `
+      <div style="font-size:11px;color:var(--text2);margin-bottom:8px">${data.frames.length} frames from ${data.duration?.toFixed(1)}s video — click a frame to reverse search it</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${data.frames.map(f => `
+          <div style="text-align:center;cursor:pointer" onclick="runReverseSearch('${escHtml(caseId)}','${escHtml(filename)}',${f.timestamp},'rs_result_${escHtml(containerId)}')">
+            <img src="${escHtml(f.url)}" style="width:120px;height:68px;object-fit:cover;border-radius:4px;border:2px solid var(--border)" title="t=${f.timestamp}s" onerror="this.style.opacity='.3'">
+            <div style="font-size:10px;color:var(--text2);margin-top:2px">${f.timestamp}s</div>
+          </div>`).join('')}
+      </div>`;
+  } catch(e) {
+    el.innerHTML = `<div style="color:var(--critical);font-size:12px">Error: ${escHtml(String(e))}</div>`;
+  }
+}
+
+async function runReverseSearch(caseId, filename, timestamp, resultContainerId) {
+  const el = document.getElementById(resultContainerId);
+  if (!el) return;
+  // Highlight selected frame
+  el.closest('.media-card')?.querySelectorAll('img[title^="t="]').forEach(img => img.style.borderColor = 'var(--border)');
+  const tsLabel = timestamp != null ? timestamp : 'image';
+  el.innerHTML = `<div style="color:var(--text2);font-size:12px;padding:8px 0">Uploading to Catbox.moe and searching via Google Lens + Yandex…</div>`;
+  try {
+    const body = { filename };
+    if (timestamp != null) body.timestamp = timestamp;
+    const r = await fetch(`/api/cases/${caseId}/reverse-search`, {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+    });
+    if (!r.ok) {
+      const err = await r.json();
+      el.innerHTML = `<div style="color:var(--critical);font-size:12px;padding:8px 0">Error: ${escHtml(err.detail||String(err))}</div>`;
+      return;
+    }
+    const data = await r.json();
+    el.innerHTML = renderReverseSearchResult(data);
+  } catch(e) {
+    el.innerHTML = `<div style="color:var(--critical);font-size:12px;padding:8px 0">Error: ${escHtml(String(e))}</div>`;
+  }
+}
+
+function renderReverseSearchResult(data) {
+  if (!data.success) return `<div style="color:var(--critical);font-size:12px">Search failed.</div>`;
+  const matches = data.matches || [];
+  if (!matches.length) return `<div style="color:var(--low);font-size:12px;padding:8px 0">✓ No visual matches found — image appears unique on the web.</div>`;
+
+  const byEngine = {};
+  for (const m of matches) {
+    if (!byEngine[m.engine]) byEngine[m.engine] = [];
+    byEngine[m.engine].push(m);
+  }
+  let html = `<div style="margin-top:10px;border-top:1px solid var(--border);padding-top:10px">`;
+  html += `<div style="font-size:12px;font-weight:600;color:var(--critical);margin-bottom:8px">⚠ Found ${matches.length} match(es) on the web</div>`;
+  if (data.earliest_match) {
+    const em = data.earliest_match;
+    html += `<div style="background:rgba(248,81,73,.1);border-left:3px solid var(--critical);padding:6px 10px;border-radius:0 4px 4px 0;margin-bottom:10px;font-size:12px">
+      <strong style="color:var(--critical)">Earliest: ${escHtml(em.date)}</strong> — <a href="${escHtml(em.link)}" target="_blank" style="color:var(--accent2)">${escHtml(em.title||em.source||em.link)}</a>
+    </div>`;
+  }
+  for (const [engine, ems] of Object.entries(byEngine)) {
+    const label = engine === 'google_lens' ? 'Google Lens' : engine === 'yandex' ? 'Yandex' : engine;
+    const color = engine === 'google_lens' ? '#4285f4' : '#fc3f1d';
+    html += `<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:600;color:${color};margin-bottom:6px">${escHtml(label)} — ${ems.length} match(es)</div>`;
+    html += `<div style="display:flex;flex-wrap:wrap;gap:6px">`;
+    for (const m of ems) {
+      html += `<div style="background:var(--bg3);border-radius:5px;overflow:hidden;border:1px solid var(--border);width:160px">`;
+      if (m.thumbnail) html += `<img src="${escHtml(m.thumbnail)}" style="width:100%;height:70px;object-fit:cover;display:block" onerror="this.style.display='none'">`;
+      html += `<div style="padding:5px 7px">
+        <a href="${escHtml(m.link)}" target="_blank" style="color:var(--accent2);font-size:11px;font-weight:600;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(m.title||'')}">${escHtml((m.title||m.source||m.link||'').slice(0,40))}</a>
+        <div style="color:var(--text2);font-size:10px">${escHtml(m.source||'')}</div>
+        ${m.date?`<div style="color:var(--medium);font-size:10px">${escHtml(m.date)}</div>`:''}
+      </div></div>`;
+    }
+    html += '</div></div>';
+  }
+  html += `<div style="font-size:10px;color:var(--text2);margin-top:4px">Searched via: <a href="${escHtml(data.public_url)}" target="_blank" style="color:var(--accent2)">Catbox link</a></div>`;
+  html += '</div>';
+  return html;
+}
+
 function renderMedia(c) {
   const files = c.media_files || [];
   if (!files.length) return '<div style="color:var(--text2);padding:20px">No media files downloaded.</div>';
-  return `<div class="media-grid">${files.map(m => {
-    const isImg = m.media_type === 'image';
-    const imgSrc = isImg ? `/api/cases/${c.id}/media/${m.filename}` : null;
-    const icon = m.media_type==='video'?'🎬':m.media_type==='audio'?'🎵':'📁';
-    return `
-      <div class="media-card">
-        ${isImg ? `<img class="media-thumb" src="${imgSrc}" loading="lazy" onerror="this.style.display='none'">` : `<div class="media-thumb">${icon}</div>`}
-        <div class="media-info">
-          <div class="media-filename">${escHtml(m.filename)}</div>
-          <div class="media-meta">
-            ${m.media_type} · ${fmtSize(m.file_size)}
-            ${m.metadata?.Make ? `<br>📷 ${escHtml(m.metadata.Make)} ${escHtml(m.metadata.Model||'')}`:''}
-            ${m.metadata?.DateTime||m.metadata?.DateTimeOriginal ? `<br>📅 ${escHtml(m.metadata.DateTimeOriginal||m.metadata.DateTime)}`:''}
-          </div>
-          <div class="media-hash" style="margin-top:6px">SHA256: ${m.hash_sha256.slice(0,20)}…</div>
-          ${m.gps_lat ? `
-            <div class="media-gps">
-              📍 ${m.gps_lat.toFixed(5)}, ${m.gps_lon.toFixed(5)}<br>
-              ${m.gps_address?escHtml(m.gps_address.slice(0,60))+'…':''}
-              <br><a href="https://maps.google.com/?q=${m.gps_lat},${m.gps_lon}" target="_blank">Open in Maps</a>
-            </div>` : ''}
-          ${m.ocr_text ? `<div style="margin-top:6px;font-size:11px;color:var(--text2)">OCR text:</div><div class="ocr-box">${escHtml(m.ocr_text.slice(0,500))}</div>`:''}
-          ${Object.keys(m.reverse_search_urls||{}).length ? `
-            <div class="media-links">
-              ${Object.entries(m.reverse_search_urls).map(([k,v])=>`<a class="media-link" href="${escHtml(v)}" target="_blank">${k.replace('_',' ')}</a>`).join('')}
-            </div>` : ''}
-        </div>
-      </div>`;
-  }).join('')}</div>`;
+
+  return files.map((m, idx) => {
+    const mediaUrl = `/api/cases/${c.id}/media/${encodeURIComponent(m.filename)}`;
+    const kfContainerId = `kf_${c.id}_${idx}`;
+    const rsResultId = `rs_result_kf_${c.id}_${idx}`;
+    const isVideo = m.media_type === 'video';
+    const isImage = m.media_type === 'image';
+    const isAudio = m.media_type === 'audio';
+
+    let mediaHtml = '';
+    if (isVideo) {
+      mediaHtml = `
+        <video controls style="width:100%;max-height:360px;border-radius:6px;background:#000;display:block;margin-bottom:12px">
+          <source src="${mediaUrl}" type="video/mp4">
+          Your browser does not support video playback.
+        </video>`;
+    } else if (isImage) {
+      mediaHtml = `<img src="${mediaUrl}" style="max-width:100%;max-height:400px;border-radius:6px;display:block;margin:0 auto 12px;cursor:pointer" loading="lazy" onerror="this.style.display='none'" onclick="window.open('${mediaUrl}','_blank')">`;
+    } else if (isAudio) {
+      mediaHtml = `<audio controls style="width:100%;margin-bottom:12px"><source src="${mediaUrl}"></audio>`;
+    }
+
+    const searchBtn = (isImage || isVideo)
+      ? `<button onclick="${isImage ? `runReverseSearch('${c.id}','${m.filename}',null,'${rsResultId}')` : `loadKeyframes('${c.id}','${m.filename}','${kfContainerId}')`}" style="background:var(--accent2);color:#fff;border:none;border-radius:4px;padding:5px 12px;font-size:12px;cursor:pointer;margin-bottom:12px">
+          ${isImage ? 'Reverse Search this Image' : 'Load Keyframes for Reverse Search'}
+        </button>`
+      : '';
+
+    return `<div class="card" style="margin-bottom:16px">
+      <div style="font-size:14px;font-weight:600;margin-bottom:8px">${escHtml(m.filename)}</div>
+      ${mediaHtml}
+      <div style="font-size:12px;color:var(--text2);margin-bottom:10px">
+        ${m.media_type} · ${fmtSize(m.file_size)}
+        ${m.width ? ` · ${m.width}×${m.height}` : ''}
+        ${m.metadata?.Make ? ` · 📷 ${escHtml(m.metadata.Make)} ${escHtml(m.metadata.Model||'')}` : ''}
+        ${m.metadata?.DateTimeOriginal||m.metadata?.DateTime ? ` · 📅 ${escHtml(m.metadata.DateTimeOriginal||m.metadata.DateTime||'')}` : ''}
+      </div>
+      ${m.hash_sha256 ? `<div style="font-family:monospace;font-size:10px;color:var(--text2);margin-bottom:8px">SHA256: ${escHtml(m.hash_sha256)}</div>` : ''}
+      ${m.gps_lat ? `<div style="background:var(--bg3);border-radius:4px;padding:8px 10px;margin-bottom:10px;font-size:12px">
+        📍 ${m.gps_lat.toFixed(5)}, ${m.gps_lon.toFixed(5)} ${m.gps_address?'— '+escHtml(m.gps_address.slice(0,80)):''}
+        <a href="https://maps.google.com/?q=${m.gps_lat},${m.gps_lon}" target="_blank" style="color:var(--accent2);margin-left:8px">Open in Maps</a>
+      </div>` : ''}
+      ${m.ocr_text ? `<div style="font-size:11px;color:var(--text2);margin-bottom:4px">OCR text:</div><div class="ocr-box">${escHtml(m.ocr_text.slice(0,500))}</div>` : ''}
+      ${searchBtn}
+      ${isVideo ? `<div id="${kfContainerId}" style="margin-bottom:10px"></div>` : ''}
+      <div id="${rsResultId}"></div>
+    </div>`;
+  }).join('');
 }
 
 function renderIdentity(c) {

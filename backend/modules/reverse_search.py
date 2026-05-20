@@ -18,6 +18,8 @@ import logging
 import os
 import subprocess
 import tempfile
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
@@ -26,13 +28,35 @@ import requests
 logger = logging.getLogger(__name__)
 
 
-# ── Catbox uploader ───────────────────────────────────────────────────────────
+# ── Public image uploader (tries multiple hosts) ──────────────────────────────
+
+def _upload_imgur(file_path: str) -> Optional[str]:
+    """Upload to Imgur anonymous (no account required)."""
+    import base64
+    try:
+        with open(file_path, "rb") as f:
+            data = base64.b64encode(f.read()).decode()
+        r = requests.post(
+            "https://api.imgur.com/3/image",
+            headers={"Authorization": "Client-ID 546c25a59c58ad7"},
+            data={"image": data, "type": "base64"},
+            timeout=30, verify=False,
+        )
+        link = r.json().get("data", {}).get("link")
+        if link:
+            logger.info("Uploaded to Imgur: %s", link)
+            return link
+    except Exception as e:
+        logger.warning("Imgur upload error: %s", e)
+    return None
+
 
 def upload_to_catbox(file_path: str) -> Optional[str]:
     """
-    Upload a local image to Catbox.moe and return a public URL.
-    Catbox is free, no account needed, files persist ~72h.
+    Upload a local image to a public host and return a URL SerpAPI can fetch.
+    Tries Catbox.moe first, falls back to Imgur anonymous upload.
     """
+    # Try Catbox first
     try:
         with open(file_path, "rb") as f:
             r = requests.post(
@@ -45,10 +69,11 @@ def upload_to_catbox(file_path: str) -> Optional[str]:
             url = r.text.strip()
             logger.info("Uploaded to Catbox: %s", url)
             return url
-        logger.warning("Catbox upload failed: %s %s", r.status_code, r.text[:100])
+        logger.warning("Catbox upload failed (%s %s) — trying Imgur", r.status_code, r.text[:60])
     except Exception as e:
-        logger.warning("Catbox upload error: %s", e)
-    return None
+        logger.warning("Catbox upload error: %s — trying Imgur", e)
+
+    return _upload_imgur(file_path)
 
 
 # ── Video keyframe extraction ─────────────────────────────────────────────────

@@ -348,7 +348,19 @@ function renderCase(c) {
 
   // Header
   document.getElementById('case-title').textContent = c.source_type === 'media_upload' ? `Media Investigation · Case ${c.id}` : `Case ${c.id}`;
-  document.getElementById('case-url-display').textContent = c.source_type === 'media_upload' ? `Uploaded: ${c.url.replace('media:','')}` : c.url;
+  if (c.source_type === 'media_upload') {
+    const filename = c.url.replace('media:', '');
+    const isImage = /\.(png|jpe?g|gif|webp|bmp)$/i.test(filename);
+    const imgSrc = `/api/cases/${c.id}/media/${encodeURIComponent(filename)}`;
+    document.getElementById('case-url-display').innerHTML = isImage
+      ? `<div style="display:flex;align-items:center;gap:10px;margin-top:4px">
+           <img src="${escHtml(imgSrc)}" style="height:48px;max-width:120px;object-fit:cover;border-radius:4px;border:1px solid var(--border)" onerror="this.style.display='none'">
+           <span style="font-size:13px;color:var(--text2)">${escHtml(filename)}</span>
+         </div>`
+      : `<span>Uploaded: ${escHtml(filename)}</span>`;
+  } else {
+    document.getElementById('case-url-display').textContent = c.url;
+  }
 
   const sr = document.getElementById('case-status-row');
   const risk = c.risk_label || 'MINIMAL';

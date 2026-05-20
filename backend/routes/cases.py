@@ -73,7 +73,7 @@ async def get_media(case_id: str, filename: str):
 
 
 @router.get("/cases/{case_id}/keyframes/{filename}")
-async def get_keyframes(case_id: str, filename: str):
+def get_keyframes(case_id: str, filename: str):
     """Extract keyframes from a video and return their paths/timestamps."""
     import subprocess, tempfile, json as _json
     case_dir = Path(_CASES_DIR) / case_id
@@ -118,7 +118,7 @@ async def get_keyframes(case_id: str, filename: str):
 
 
 @router.get("/cases/{case_id}/keyframes/{video_filename}/{frame_filename}")
-async def get_keyframe_image(case_id: str, video_filename: str, frame_filename: str):
+def get_keyframe_image(case_id: str, video_filename: str, frame_filename: str):
     """Serve a specific keyframe image."""
     from pathlib import Path as P
     stem = P(video_filename).stem
@@ -134,7 +134,7 @@ class ReverseSearchRequest(BaseModel):
 
 
 @router.post("/cases/{case_id}/reverse-search")
-async def run_reverse_search(case_id: str, req: ReverseSearchRequest):
+def run_reverse_search(case_id: str, req: ReverseSearchRequest):
     """Run reverse image search on a media file or specific video frame."""
     import subprocess, tempfile as _tmpfile, os as _os
     case_dir = Path(_CASES_DIR) / case_id

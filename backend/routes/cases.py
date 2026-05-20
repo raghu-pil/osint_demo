@@ -271,14 +271,19 @@ def _run_media_pipeline(case_id: str, manager: CaseManager):
         source_url = lines[0][len("source_url:"):].strip()
 
     try:
-        # Step 1: Reverse search
-        step_start("reverse_search", "Reverse Image Search")
+        # Step 1: Reverse search + proactive known-account check
+        step_start("reverse_search", "Reverse Image Search + Known Account Check")
         from backend.modules.media_pipeline import run_media_investigation, parse_social_url, scrape_account
         inv = run_media_investigation(file_path, api_key, max_results=15)
+        proactive = inv.get("proactive_check", {})
+        n_proactive = len(proactive.get("confirmed_matches", []))
         case.media_investigation = {
             "public_url": inv.get("public_url"),
             "raw_match_count": len(inv.get("raw_matches", [])),
             "source_url": source_url,
+            "proactive_matches": n_proactive,
+            "proactive_checked": len(proactive.get("checked", [])),
+            "manual_links": proactive.get("manual_links", {}),
         }
         discovered = list(inv.get("discovered_accounts", []))
 
@@ -314,7 +319,9 @@ def _run_media_pipeline(case_id: str, manager: CaseManager):
                 case.media_investigation["source_url_note"] = f"Source URL provided: {source_url}"
 
         case.discovered_accounts = discovered
-        step_done("reverse_search", f"{len(inv.get('raw_matches',[]))} visual matches found"
+        step_done("reverse_search",
+                  f"{len(inv.get('raw_matches',[]))} visual matches · "
+                  f"{n_proactive} known-account proactive matches"
                   + (f" · source: {source_url}" if source_url else ""))
 
         # Step 2: Generate guidance from discovered accounts

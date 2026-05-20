@@ -20,6 +20,7 @@ import logging
 import re
 import time
 from datetime import datetime, timezone
+from io import BytesIO
 from typing import Dict, List, Optional, Any
 from urllib.parse import urlparse, parse_qs
 
@@ -381,6 +382,135 @@ def score_account(account: Dict, all_accounts: List[Dict], earliest_date: Option
     return account
 
 
+# ── Proactive known-account visual check ─────────────────────────────────────
+
+def _phash_distance(path_or_url_a: str, img_bytes_b: bytes) -> Optional[int]:
+    """Return perceptual hash distance between two images (lower = more similar)."""
+    try:
+        import imagehash
+        from PIL import Image
+        img_a = Image.open(path_or_url_a).convert("RGB")
+        img_b = Image.open(BytesIO(img_bytes_b)).convert("RGB")
+        return imagehash.phash(img_a) - imagehash.phash(img_b)
+    except Exception:
+        return None
+
+
+def proactive_known_account_check(
+    file_path: str,
+    public_url: str,
+    api_key: str,
+    max_accounts: int = 8,
+) -> Dict[str, Any]:
+    """
+    For each known misinformation account, search Google Images restricted
+    to their Twitter/X profile and compare thumbnails perceptually against
+    the uploaded image.  Uses 1 SerpAPI credit per account checked.
+
+    Returns:
+      {
+        "confirmed_matches": [...],   # accounts with visually similar images found
+        "checked": [...],             # accounts checked (no match)
+        "manual_links": {...},        # free manual-verification links for all known accounts
+      }
+    """
+    from backend.modules.known_accounts import MISINFO_ACCOUNTS, FACTCHECK_ACCOUNTS
+
+    result = {
+        "confirmed_matches": [],
+        "checked": [],
+        "manual_links": {},
+        "errors": [],
+    }
+
+    # Build manual links for ALL known accounts — free, no API call
+    for username, meta in {**MISINFO_ACCOUNTS, **FACTCHECK_ACCOUNTS}.items():
+        result["manual_links"][username] = {
+            "twitter_media": f"https://twitter.com/{username}/media",
+            "google_images": f"https://www.google.com/search?q=site%3Atwitter.com%2F{username}&tbm=isch",
+            "type": "misinfo" if username in MISINFO_ACCOUNTS else "factcheck",
+            "note": meta.get("note") or meta.get("org", ""),
+        }
+
+    if not api_key:
+        result["errors"].append("No SerpAPI key — skipping proactive check")
+        return result
+
+    # Check the top N misinfo accounts with actual API calls + hash comparison
+    accounts_to_check = list(MISINFO_ACCOUNTS.items())[:max_accounts]
+
+    for username, meta in accounts_to_check:
+        logger.info("Proactive check: searching Google Images for @%s", username)
+        try:
+            from serpapi import GoogleSearch
+            res = GoogleSearch({
+                "engine": "google_images",
+                "q": f"site:twitter.com/{username} OR site:x.com/{username}",
+                "api_key": api_key,
+                "num": 10,
+                "safe": "off",
+            }).get_dict()
+
+            img_results = res.get("images_results", [])
+            best_diff = None
+            best_match = None
+
+            for img in img_results[:8]:
+                thumb = img.get("thumbnail") or img.get("original")
+                if not thumb:
+                    continue
+                try:
+                    r = requests.get(thumb, timeout=10, verify=False)
+                    diff = _phash_distance(file_path, r.content)
+                    if diff is not None:
+                        if best_diff is None or diff < best_diff:
+                            best_diff = diff
+                            best_match = img
+                except Exception:
+                    continue
+
+            entry = {
+                "username": username,
+                "platform": "twitter",
+                "account_url": f"https://twitter.com/{username}",
+                "known_type": "misinfo",
+                "known_note": meta.get("note", ""),
+                "region": meta.get("region", ""),
+                "google_images_count": len(img_results),
+                "best_hash_diff": best_diff,
+            }
+
+            # Threshold: diff < 15 = visually similar (accounting for thumbnail compression)
+            if best_diff is not None and best_diff < 15:
+                entry["match_thumbnail"] = best_match.get("thumbnail", "")
+                entry["match_title"] = best_match.get("title", "")
+                entry["post_url"] = best_match.get("link", "")
+                entry["severity_score"] = 95
+                entry["severity_label"] = "CRITICAL"
+                entry["score_reasons"] = [
+                    f"PROACTIVE MATCH — visually similar image found on known misinfo account @{username}",
+                    f"Hash similarity: {64 - best_diff}/64",
+                    f"Known misinfo: {meta.get('note','')}",
+                ]
+                result["confirmed_matches"].append(entry)
+                logger.info("Proactive match found: @%s (hash diff %d)", username, best_diff)
+            else:
+                entry["match_found"] = False
+                result["checked"].append(entry)
+
+            time.sleep(0.2)
+
+        except Exception as e:
+            logger.warning("Proactive check failed for @%s: %s", username, e)
+            result["errors"].append(f"@{username}: {e}")
+
+    logger.info(
+        "Proactive check complete: %d matches, %d checked, %d accounts with manual links",
+        len(result["confirmed_matches"]), len(result["checked"]), len(result["manual_links"])
+    )
+    return result
+
+
 # ── Main entry point ──────────────────────────────────────────────────────────
 
 def run_media_investigation(
@@ -495,7 +625,31 @@ def run_media_investigation(
     for i, a in enumerate(accounts):
         a["rank"] = i + 1
 
+    # Step 6: proactive check against known misinfo accounts
+    proactive = proactive_known_account_check(file_path, public_url, api_key, max_accounts=8)
+    result["proactive_check"] = proactive
+
+    # Merge confirmed proactive matches into accounts (avoid duplicates)
+    existing_usernames = {a.get("username", "").lower() for a in accounts if a.get("username")}
+    for match in proactive.get("confirmed_matches", []):
+        uname = match.get("username", "").lower()
+        if uname not in existing_usernames:
+            # Try to scrape the account for full details
+            try:
+                scraped = scrape_account(match)
+                match = {**match, **{k: v for k, v in scraped.items() if v is not None}}
+            except Exception:
+                pass
+            accounts.append(match)
+            existing_usernames.add(uname)
+
+    # Re-sort after adding proactive matches
+    accounts.sort(key=lambda a: (-a.get("severity_score", 0), a.get("platform", "")))
+    for i, a in enumerate(accounts):
+        a["rank"] = i + 1
+
     result["discovered_accounts"] = accounts
     result["success"] = True
-    logger.info("Media investigation complete: %d accounts discovered", len(accounts))
+    logger.info("Media investigation complete: %d accounts discovered (%d proactive matches)",
+                len(accounts), len(proactive.get("confirmed_matches", [])))
     return result

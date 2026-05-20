@@ -26,6 +26,12 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _log(case: "Case", message: str, level: str = "info"):
+    """Append a human-readable log entry and persist the case."""
+    ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
+    case.logs.append({"ts": ts, "msg": message, "level": level})
+
+
 def _step(name: str, label: str) -> ProgressStep:
     return ProgressStep(name=name, label=label)
 
@@ -129,10 +135,13 @@ def run_pipeline(case_id: str, manager: CaseManager):
     try:
         # ── Step 1: URL Parse ─────────────────────────────────────────────────
         manager.step_start(case, "url_parse")
+        _log(case, "Identifying platform and content type from URL…")
+        manager.save(case)
         try:
             from osint.core.url_parser import parse_url
             parsed = parse_url(case.url)
             case.platform = parsed.platform
+            _log(case, f"Platform identified: {parsed.platform or 'unknown'}")
             manager.step_done(case, "url_parse", f"Platform: {parsed.platform}, post_id: {parsed.post_id}")
         except Exception as e:
             case.errors.append(f"URL parse: {e}")
@@ -141,6 +150,8 @@ def run_pipeline(case_id: str, manager: CaseManager):
 
         # ── Step 2: Scrape Post ───────────────────────────────────────────────
         manager.step_start(case, "scrape_post")
+        _log(case, "Fetching post content and engagement metrics…")
+        manager.save(case)
         osint_report = None
         try:
             from osint.main import run as osint_run
@@ -155,9 +166,12 @@ def run_pipeline(case_id: str, manager: CaseManager):
             case.manual_searches = report_dict.get("dark_web", {}).get("manual_searches") or []
 
             if case.post:
+                author = case.post.get('author_username', '?')
+                _log(case, f"Post retrieved — author @{author}, risk score {case.risk_score}")
                 manager.step_done(case, "scrape_post",
                     f"Got post by @{case.post.get('author_username', '?')}")
             else:
+                _log(case, "No structured post data returned; continuing with available information")
                 manager.step_done(case, "scrape_post", "No structured post data found")
         except Exception as e:
             case.errors.append(f"Post scrape: {e}")
@@ -166,13 +180,17 @@ def run_pipeline(case_id: str, manager: CaseManager):
 
         # ── Step 3: Account ───────────────────────────────────────────────────
         manager.step_start(case, "account")
+        _log(case, "Retrieving account profile and public information…")
+        manager.save(case)
         try:
             if osint_report and osint_report.account:
                 from osint.output.formatter import report_to_dict
                 case.account = report_to_dict(osint_report).get("account")
+                followers = case.account.get('metrics',{}).get('followers','?')
+                _log(case, f"Account profile loaded — @{case.account.get('username','?')}, {followers} followers")
                 manager.step_done(case, "account",
                     f"@{case.account.get('username','?')}: "
-                    f"{case.account.get('metrics',{}).get('followers','?')} followers")
+                    f"{followers} followers")
             else:
                 manager.step_skip(case, "account", "No account data from scraper")
         except Exception as e:
@@ -181,6 +199,8 @@ def run_pipeline(case_id: str, manager: CaseManager):
 
         # ── Step 3b: Account History & Bio Enrichment ─────────────────────────
         manager.step_start(case, "account_history")
+        _log(case, "Pulling extended account history, posting patterns, and bio links…")
+        manager.save(case)
         try:
             from backend.modules.account_history import enrich_account
             from backend.models import AccountEnrichment
@@ -226,6 +246,8 @@ def run_pipeline(case_id: str, manager: CaseManager):
         # ── Step 4: Cross-posts ───────────────────────────────────────────────
         if not config.get("skip_crossposts"):
             manager.step_start(case, "cross_posts")
+            _log(case, "Searching for the same content on other platforms…")
+            manager.save(case)
             try:
                 if osint_report:
                     from osint.output.formatter import report_to_dict
@@ -243,6 +265,8 @@ def run_pipeline(case_id: str, manager: CaseManager):
         # ── Step 5: Username search ───────────────────────────────────────────
         if not config.get("skip_sherlock"):
             manager.step_start(case, "username")
+            _log(case, "Scanning 400+ social platforms for this username (this may take 1–2 minutes)…")
+            manager.save(case)
             try:
                 if osint_report:
                     from osint.output.formatter import report_to_dict
@@ -260,6 +284,8 @@ def run_pipeline(case_id: str, manager: CaseManager):
         # ── Step 6: Dark web (enhanced) ───────────────────────────────────────
         if not config.get("skip_darkweb"):
             manager.step_start(case, "dark_web")
+            _log(case, "Querying breach databases and dark web sources for identity leaks…")
+            manager.save(case)
             try:
                 from backend.modules.darkweb_enhanced import gather_enhanced_intel
                 username = (case.account or {}).get("username") or (case.post or {}).get("author_username")
@@ -297,6 +323,8 @@ def run_pipeline(case_id: str, manager: CaseManager):
         # ── Step 7: Media download ────────────────────────────────────────────
         if not config.get("skip_media_download"):
             manager.step_start(case, "media")
+            _log(case, "Downloading media files and extracting metadata (GPS, camera info, timestamps)…")
+            manager.save(case)
             try:
                 from backend.modules.media import download_post_media, run_ocr
                 post_data = case.post or {}
@@ -316,6 +344,8 @@ def run_pipeline(case_id: str, manager: CaseManager):
 
         # ── Step 8: Identity pivots ───────────────────────────────────────────
         manager.step_start(case, "identity")
+        _log(case, "Correlating any emails, phone numbers, or handles found in the profile…")
+        manager.save(case)
         try:
             from backend.modules.identity import extract_identifiers, run_identity_pivot
             full_report = {
@@ -337,6 +367,8 @@ def run_pipeline(case_id: str, manager: CaseManager):
 
         # ── Step 9: Analyst guidance ──────────────────────────────────────────
         manager.step_start(case, "guidance")
+        _log(case, "Analysing all collected data and generating prioritised investigation leads…")
+        manager.save(case)
         try:
             from backend.modules.guidance import generate_guidance
             report_for_guidance = {
@@ -355,6 +387,11 @@ def run_pipeline(case_id: str, manager: CaseManager):
                 identity_pivots=case.identity_pivots,
                 account_enrichment=case.account_enrichment,
             )
+            # Check if investigated account is a known misinfo/factcheck account
+            from backend.modules.known_accounts import enrich_guidance_with_known_accounts
+            enrich_guidance_with_known_accounts(case)
+            n_critical = sum(1 for g in case.guidance if g.severity == "critical")
+            _log(case, f"Generated {len(case.guidance)} leads ({n_critical} critical)")
             manager.step_done(case, "guidance", f"{len(case.guidance)} recommendations")
         except Exception as e:
             case.errors.append(f"Guidance: {e}")
@@ -362,6 +399,8 @@ def run_pipeline(case_id: str, manager: CaseManager):
 
         # ── Step 10: Auto Actions ─────────────────────────────────────────────
         manager.step_start(case, "auto_actions")
+        _log(case, "Running automated follow-up actions: profile scraping, reverse image search, link expansion…")
+        manager.save(case)
         try:
             from backend.modules.auto_actions import run_all_auto_actions
             serpapi_key = config.get("serpapi_api_key", "")
@@ -445,11 +484,15 @@ def run_pipeline(case_id: str, manager: CaseManager):
             manager.step_fail(case, "auto_actions", str(e))
 
         case.status = CaseStatus.COMPLETED
+        n_leads = len(case.guidance)
+        n_critical = sum(1 for g in case.guidance if g.severity == "critical")
+        _log(case, f"Investigation complete — {n_leads} leads generated, {n_critical} critical")
 
     except Exception as e:
         logger.exception("Pipeline crashed for case %s", case_id)
         case.status = CaseStatus.FAILED
         case.errors.append(f"Pipeline crash: {e}")
+        _log(case, f"Investigation stopped due to an error: {e}", level="error")
 
     manager.save(case)
     logger.info("Pipeline finished for case %s: %s", case_id, case.status)

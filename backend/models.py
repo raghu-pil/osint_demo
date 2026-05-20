@@ -175,4 +175,7 @@ class Case(BaseModel):
     discovered_accounts: List[Dict[str, Any]] = []
     media_investigation: Optional[Dict[str, Any]] = None
 
+    # Live activity log (human-readable, general language)
+    logs: List[Dict[str, str]] = []
+
     errors: List[str] = []

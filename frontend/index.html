@@ -54,6 +54,7 @@ body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; back
 .dot-completed { background: var(--low); }
 .dot-failed { background: var(--critical); }
 @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:.3 } }
+@keyframes spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }
 
 /* ── Main ── */
 #main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
@@ -305,7 +306,7 @@ async function refreshSidebar() {
 async function selectCase(id) {
   currentCaseId = id;
   clearInterval(pollTimer);
-  activeTab = 'guidance';
+  activeTab = 'activitylog';  // always start on activity log so user sees progress
   try {
     const c = await getCase(id);
     renderCase(c);
@@ -317,6 +318,10 @@ async function selectCase(id) {
           if (fresh.status !== 'running' && fresh.status !== 'pending') {
             clearInterval(pollTimer);
             refreshSidebar();
+            // Switch to relevant tab on completion
+            if (activeTab === 'activitylog') {
+              activeTab = fresh.source_type === 'media_upload' ? 'discovered' : 'guidance';
+            }
           }
         } catch(e) { clearInterval(pollTimer); }
       }, 2000);
@@ -356,9 +361,12 @@ function renderCase(c) {
   // Tabs — media-upload cases get a different primary tab
   const enr = c.account_enrichment || {};
   const isMediaCase = c.source_type === 'media_upload';
+  const logCount = c.logs?.length || 0;
+  const isRunning = c.status === 'running' || c.status === 'pending';
   const tabs = isMediaCase ? [
     {id:'discovered', label:'Discovered Accounts', count: c.discovered_accounts?.length||0},
     {id:'guidance',   label:'Leads',               count: c.guidance?.length||0},
+    {id:'activitylog',label: isRunning ? '⟳ Activity' : 'Activity Log', count: logCount},
   ] : [
     {id:'guidance', label:'Leads & Actions', count: c.guidance?.length||0},
     {id:'post',     label:'Post',            count: c.post?1:0},
@@ -371,6 +379,7 @@ function renderCase(c) {
     {id:'flags',    label:'Red Flags',       count: c.red_flags?.length||0},
     {id:'revsearch',label:'Reverse Search',  count: Object.values(c.auto_actions||{}).filter(v=>v.serpapi_results?.all_matches?.length>0).reduce((s,v)=>s+v.serpapi_results.all_matches.length,0)},
     {id:'autoact',  label:'Auto-Actions',    count: Object.keys(c.auto_actions||{}).length},
+    {id:'activitylog',label: isRunning ? '⟳ Activity' : 'Activity Log', count: logCount},
     {id:'graph',    label:'Network Graph',   count: 0},
   ];
   // Default first tab for media cases
@@ -513,7 +522,8 @@ function renderTabContent(c, tab) {
     case 'network':  el.innerHTML = renderNetwork(c); break;
     case 'darkweb':  el.innerHTML = renderDarkweb(c); break;
     case 'flags':    el.innerHTML = renderFlags(c); break;
-    case 'discovered':el.innerHTML = renderDiscoveredAccounts(c); break;
+    case 'discovered':  el.innerHTML = renderDiscoveredAccounts(c); break;
+    case 'activitylog': renderActivityLog(c, el); break;
     case 'revsearch':el.innerHTML = renderReverseSearch(c); break;
     case 'autoact':  el.innerHTML = renderAutoActions(c); break;
     case 'graph':    renderNetworkGraph(c, el); break;
@@ -1039,6 +1049,54 @@ function renderFlags(c) {
           ${f.evidence?`<div class="flag-evidence">${escHtml(f.evidence)}</div>`:''}
         </div>
       </div>`).join('')}</div>`;
+}
+
+// ── Activity Log renderer ─────────────────────────────────────────────────────
+function renderActivityLog(c, el) {
+  const logs = c.logs || [];
+  const isRunning = c.status === 'running' || c.status === 'pending';
+
+  const levelIcon = l => l === 'error' ? '✗' : l === 'warn' ? '⚠' : '›';
+  const levelColor = l => l === 'error' ? 'var(--critical)' : l === 'warn' ? 'var(--medium)' : 'var(--text2)';
+
+  let html = `<div style="font-family:monospace;font-size:12px;line-height:1.7">`;
+
+  if (isRunning) {
+    // Show running steps
+    const running = (c.steps||[]).filter(s=>s.status==='running');
+    if (running.length) {
+      html += `<div style="background:rgba(31,111,235,.1);border:1px solid rgba(31,111,235,.3);border-radius:6px;padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px">
+        <span style="color:var(--accent2);font-size:16px;animation:spin 1s linear infinite;display:inline-block">⟳</span>
+        <span style="color:var(--accent2);font-size:13px"><strong>${escHtml(running[0].label)}</strong></span>
+      </div>`;
+    }
+  }
+
+  if (!logs.length && isRunning) {
+    html += `<div style="color:var(--text2);padding:8px 0">Starting investigation…</div>`;
+  }
+
+  for (const entry of logs) {
+    const icon = levelIcon(entry.level);
+    const color = levelColor(entry.level);
+    html += `<div style="display:flex;gap:10px;padding:3px 0;border-bottom:1px solid rgba(48,54,61,.5)">
+      <span style="color:var(--border);min-width:56px;flex-shrink:0">${escHtml(entry.ts)}</span>
+      <span style="color:${color};min-width:12px">${icon}</span>
+      <span style="color:${entry.level==='error'?'var(--critical)':entry.level==='warn'?'var(--medium)':'var(--text)'}">${escHtml(entry.msg)}</span>
+    </div>`;
+  }
+
+  if (!isRunning && c.status === 'completed') {
+    html += `<div style="color:var(--low);margin-top:8px;padding:8px 0;border-top:1px solid var(--border)">✓ Investigation complete</div>`;
+  } else if (!isRunning && c.status === 'failed') {
+    html += `<div style="color:var(--critical);margin-top:8px;padding:8px 0;border-top:1px solid var(--border)">✗ Investigation failed${c.errors?.length?' — '+escHtml(c.errors[0]):''}</div>`;
+  }
+
+  html += '</div>';
+  el.innerHTML = html;
+
+  // Auto-scroll to bottom while running
+  if (isRunning) el.scrollTop = el.scrollHeight;
 }
 
 function renderReverseSearch(c) {
@@ -1814,6 +1872,9 @@ function renderDiscoveredAccounts(c) {
             <span style="font-size:11px;color:var(--text2)">@${escHtml(username)}</span>
             <span style="font-size:10px;background:var(--bg3);padding:1px 6px;border-radius:3px;color:var(--text2)">${icon} ${escHtml(a.platform)}</span>
             ${a.verified ? `<span style="font-size:10px;color:var(--accent2)">✓ Verified</span>` : ''}
+            ${a.known_type === 'misinfo' ? `<span style="font-size:10px;font-weight:700;background:rgba(248,81,73,.2);color:var(--critical);padding:1px 7px;border-radius:3px">⚠ KNOWN MISINFO</span>` : ''}
+            ${a.known_type === 'factcheck' ? `<span style="font-size:10px;font-weight:700;background:rgba(63,185,80,.15);color:var(--low);padding:1px 7px;border-radius:3px">✓ FACT-CHECKER: ${escHtml(a.known_org||'')}</span>` : ''}
+            ${a.known_type === 'state_media' ? `<span style="font-size:10px;font-weight:700;background:rgba(240,136,62,.15);color:var(--high);padding:1px 7px;border-radius:3px">STATE MEDIA</span>` : ''}
             <span style="font-size:10px;color:var(--text2);margin-left:auto">via ${escHtml(a.match_engine||'')}</span>
           </div>
 

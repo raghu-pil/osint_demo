@@ -484,6 +484,12 @@ def run_media_investigation(
     )
     for a in accounts:
         score_account(a, accounts, earliest_date)
+        # Boost/flag known misinformation/factcheck accounts
+        try:
+            from backend.modules.known_accounts import apply_known_account_scoring
+            apply_known_account_scoring(a)
+        except Exception:
+            pass
 
     accounts.sort(key=lambda a: (-a.get("severity_score", 0), a.get("platform", "")))
     for i, a in enumerate(accounts):

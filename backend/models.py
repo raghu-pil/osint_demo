@@ -73,6 +73,32 @@ class InvestigateRequest(BaseModel):
     notes: Optional[str] = None
 
 
+class DiscoveredAccount(BaseModel):
+    rank: int = 0
+    severity_score: int = 0
+    severity_label: str = "LOW"
+    score_reasons: List[str] = []
+    platform: str
+    username: Optional[str] = None
+    account_url: Optional[str] = None
+    post_url: Optional[str] = None
+    display_name: Optional[str] = None
+    bio: Optional[str] = None
+    avatar: Optional[str] = None
+    followers: Optional[int] = None
+    created_at: Optional[str] = None
+    verified: bool = False
+    post_text: Optional[str] = None
+    post_date: Optional[str] = None
+    likes: Optional[int] = None
+    reposts: Optional[int] = None
+    views: Optional[int] = None
+    match_engine: str = ""
+    match_thumbnail: Optional[str] = None
+    match_title: Optional[str] = None
+    source_domain: Optional[str] = None
+
+
 class PostHistory(BaseModel):
     text: str
     url: Optional[str] = None
@@ -107,6 +133,7 @@ class Case(BaseModel):
     id: str
     url: str
     notes: Optional[str] = None
+    source_type: str = "url"          # "url" | "media_upload"
     status: CaseStatus = CaseStatus.PENDING
     created_at: str
     updated_at: str
@@ -143,5 +170,9 @@ class Case(BaseModel):
 
     # Auto-action results (keyed by action_id)
     auto_actions: Dict[str, Any] = {}
+
+    # Media-first investigation results
+    discovered_accounts: List[Dict[str, Any]] = []
+    media_investigation: Optional[Dict[str, Any]] = None
 
     errors: List[str] = []

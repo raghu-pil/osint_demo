@@ -2,9 +2,9 @@ import os
 import shutil
 import threading
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -199,3 +199,171 @@ async def run_reverse_search(case_id: str, req: ReverseSearchRequest):
         "google_lens_count": len(gl),
         "yandex_count": len(yx),
     }
+
+
+# ── Media-first investigation ─────────────────────────────────────────────────
+
+def _run_media_pipeline(case_id: str, manager: CaseManager):
+    """Background task: run full media-first investigation."""
+    import mimetypes
+    from datetime import datetime, timezone
+    from backend.models import CaseStatus, ProgressStep, StepStatus, GuidanceItem
+
+    case = manager.get(case_id)
+    if not case:
+        return
+
+    def _now():
+        return datetime.now(timezone.utc).isoformat()
+
+    def step_start(name, label):
+        for s in case.steps:
+            if s.name == name:
+                s.status = StepStatus.RUNNING
+                s.started_at = _now()
+                s.label = label
+                break
+        manager.save(case)
+
+    def step_done(name, msg=""):
+        for s in case.steps:
+            if s.name == name:
+                s.status = StepStatus.COMPLETED
+                s.message = msg
+                s.completed_at = _now()
+                break
+        manager.save(case)
+
+    def step_fail(name, msg=""):
+        for s in case.steps:
+            if s.name == name:
+                s.status = StepStatus.FAILED
+                s.message = msg
+                break
+        manager.save(case)
+
+    case.status = CaseStatus.RUNNING
+    manager.save(case)
+
+    api_key = config.get("serpapi_api_key", "")
+    if not api_key:
+        case.errors.append("serpapi_api_key not set in config.yaml")
+        case.status = CaseStatus.FAILED
+        manager.save(case)
+        return
+
+    case_dir = manager.case_dir(case_id)
+    media_dir = case_dir / "media"
+    media_files = list(media_dir.iterdir()) if media_dir.exists() else []
+
+    if not media_files:
+        case.errors.append("No media file found in case directory")
+        case.status = CaseStatus.FAILED
+        manager.save(case)
+        return
+
+    file_path = str(media_files[0])
+
+    try:
+        # Step 1: Reverse search
+        step_start("reverse_search", "Reverse Image Search")
+        from backend.modules.media_pipeline import run_media_investigation
+        inv = run_media_investigation(file_path, api_key, max_results=15)
+        case.media_investigation = {
+            "public_url": inv.get("public_url"),
+            "raw_match_count": len(inv.get("raw_matches", [])),
+        }
+        discovered = inv.get("discovered_accounts", [])
+        case.discovered_accounts = discovered
+        step_done("reverse_search", f"{len(inv.get('raw_matches',[]))} visual matches found")
+
+        # Step 2: Generate guidance from discovered accounts
+        step_start("guidance", "Generating Investigation Leads")
+        guidance = []
+        for acct in discovered[:10]:
+            sev = acct.get("severity_label", "LOW").lower()
+            score = acct.get("severity_score", 0)
+            platform = acct.get("platform", "web")
+            username = acct.get("username") or acct.get("display_name") or "Unknown"
+            url = acct.get("account_url") or acct.get("post_url", "")
+            reasons = ", ".join(acct.get("score_reasons", [])) or "no specific flags"
+            followers = acct.get("followers")
+            follower_str = f" · {followers:,} followers" if followers else ""
+            created = acct.get("created_at", "")[:10] if acct.get("created_at") else ""
+            created_str = f" · account created {created}" if created else ""
+
+            guidance.append(GuidanceItem(
+                priority=acct.get("rank", 99),
+                severity=sev if sev in ("critical","high","medium","low") else "medium",
+                title=f"[{platform.upper()}] @{username} shared this content (score: {score})",
+                detail=f"This account was found sharing the uploaded media via reverse image search.{follower_str}{created_str}. "
+                       f"Flags: {reasons}.",
+                action=f"Investigate this {platform} account fully — click 'Full Investigation' to run the complete pipeline.",
+                pivot_url=url,
+                pivot_label=f"Open {platform} profile",
+                category="network",
+                auto_result={"account": acct},
+                auto_status="done",
+            ))
+
+        case.guidance = guidance
+        step_done("guidance", f"{len(guidance)} leads generated")
+
+        case.status = CaseStatus.COMPLETED
+    except Exception as e:
+        case.errors.append(f"Media pipeline error: {e}")
+        case.status = CaseStatus.FAILED
+        for s in case.steps:
+            if s.status == StepStatus.RUNNING:
+                s.status = StepStatus.FAILED
+                s.message = str(e)
+
+    manager.save(case)
+
+
+@router.post("/media-cases", response_model=Case, status_code=201)
+async def create_media_case(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    notes: Optional[str] = Form(None),
+):
+    """Start a media-first investigation by uploading an image or video."""
+    import mimetypes, uuid as _uuid
+    from datetime import datetime, timezone
+    from backend.models import CaseStatus, ProgressStep, StepStatus
+
+    manager = get_manager()
+    case_id = _uuid.uuid4().hex[:12]
+
+    # Determine file extension
+    suffix = Path(file.filename or "upload").suffix.lower() or ".jpg"
+    safe_name = f"upload{suffix}"
+
+    # Save uploaded file
+    case_dir = manager.case_dir(case_id)
+    media_dir = case_dir / "media"
+    media_dir.mkdir(parents=True, exist_ok=True)
+    dest = media_dir / safe_name
+    content = await file.read()
+    dest.write_bytes(content)
+
+    # Create case
+    from backend.models import Case as CaseModel
+    now = datetime.now(timezone.utc).isoformat()
+    case = CaseModel(
+        id=case_id,
+        url=f"media:{safe_name}",
+        notes=notes,
+        source_type="media_upload",
+        status=CaseStatus.PENDING,
+        created_at=now,
+        updated_at=now,
+        steps=[
+            ProgressStep(name="reverse_search", label="Reverse Image Search"),
+            ProgressStep(name="guidance", label="Generating Leads"),
+        ],
+    )
+    manager.save(case)
+
+    background_tasks.add_task(_run_media_pipeline, case_id, manager)
+    return case

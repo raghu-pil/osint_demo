@@ -16,15 +16,23 @@
 body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
 
 /* ── Top bar ── */
-#topbar { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 12px 20px; display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+#topbar { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 10px 20px; display: flex; align-items: center; gap: 10px; flex-shrink: 0; flex-wrap: wrap; }
 #topbar h1 { font-size: 14px; font-weight: 600; color: var(--text2); white-space: nowrap; }
 #topbar h1 span { color: var(--low); }
-#url-input { flex: 1; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: var(--radius); padding: 8px 12px; font-size: 14px; outline: none; }
+.mode-toggle { display: flex; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; flex-shrink: 0; }
+.mode-btn { padding: 6px 12px; font-size: 12px; border: none; background: transparent; color: var(--text2); cursor: pointer; white-space: nowrap; }
+.mode-btn.active { background: var(--accent2); color: #fff; }
+#url-input { flex: 1; min-width: 200px; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: var(--radius); padding: 8px 12px; font-size: 14px; outline: none; }
 #url-input:focus { border-color: var(--accent2); }
+#file-drop { flex: 1; min-width: 200px; display: none; align-items: center; gap: 8px; background: var(--bg); border: 1px dashed var(--border); border-radius: var(--radius); padding: 6px 12px; cursor: pointer; position: relative; }
+#file-drop:hover { border-color: var(--accent2); }
+#file-drop input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+#file-drop-label { font-size: 13px; color: var(--text2); pointer-events: none; }
+#file-chosen { font-size: 12px; color: var(--low); pointer-events: none; display: none; }
 #submit-btn { background: var(--accent2); color: #fff; border: none; border-radius: var(--radius); padding: 8px 18px; font-size: 14px; cursor: pointer; white-space: nowrap; }
 #submit-btn:hover { opacity: .85; }
 #submit-btn:disabled { opacity: .5; cursor: default; }
-#notes-input { background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: var(--radius); padding: 8px 10px; font-size: 13px; width: 180px; outline: none; }
+#notes-input { background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: var(--radius); padding: 8px 10px; font-size: 13px; width: 160px; outline: none; }
 
 /* ── Layout ── */
 #layout { display: flex; flex: 1; overflow: hidden; }
@@ -192,7 +200,16 @@ td a { color: var(--accent2); }
 <!-- Top bar -->
 <div id="topbar">
   <h1>OSINT <span>Tool</span></h1>
-  <input id="url-input" type="text" placeholder="Paste social media URL (Twitter, Instagram, Reddit, YouTube, TikTok, Telegram…)" />
+  <div class="mode-toggle">
+    <button class="mode-btn active" id="mode-url" onclick="setMode('url')">🔗 URL</button>
+    <button class="mode-btn" id="mode-media" onclick="setMode('media')">📁 Upload Media</button>
+  </div>
+  <input id="url-input" type="text" placeholder="Paste social media URL (Twitter, Instagram, Reddit, YouTube, TikTok…)" />
+  <div id="file-drop">
+    <input type="file" id="file-input" accept="image/*,video/*" onchange="onFileChosen(this)">
+    <span id="file-drop-label">📎 Drop image/video or click to browse</span>
+    <span id="file-chosen"></span>
+  </div>
   <input id="notes-input" type="text" placeholder="Case notes (optional)" />
   <button id="submit-btn">Investigate</button>
 </div>
@@ -265,7 +282,7 @@ function renderSidebar(cases) {
     const risk = c.risk_label || 'MINIMAL';
     return `
       <div class="case-item ${c.id===currentCaseId?'active':''}" onclick="selectCase('${c.id}')">
-        <div class="case-url">${escHtml(c.url)}</div>
+        <div class="case-url">${c.source_type==='media_upload' ? '📁 '+escHtml(c.url.replace('media:','')) : escHtml(c.url)}</div>
         <div class="case-meta">
           <span class="status-dot dot-${c.status}"></span>
           <span>${c.status}</span>
@@ -315,8 +332,8 @@ function renderCase(c) {
   cv.classList.add('visible');
 
   // Header
-  document.getElementById('case-title').textContent = `Case ${c.id}`;
-  document.getElementById('case-url-display').textContent = c.url;
+  document.getElementById('case-title').textContent = c.source_type === 'media_upload' ? `Media Investigation · Case ${c.id}` : `Case ${c.id}`;
+  document.getElementById('case-url-display').textContent = c.source_type === 'media_upload' ? `Uploaded: ${c.url.replace('media:','')}` : c.url;
 
   const sr = document.getElementById('case-status-row');
   const risk = c.risk_label || 'MINIMAL';
@@ -336,9 +353,13 @@ function renderCase(c) {
       ${s.label}
     </span>`).join('');
 
-  // Tabs
+  // Tabs — media-upload cases get a different primary tab
   const enr = c.account_enrichment || {};
-  const tabs = [
+  const isMediaCase = c.source_type === 'media_upload';
+  const tabs = isMediaCase ? [
+    {id:'discovered', label:'Discovered Accounts', count: c.discovered_accounts?.length||0},
+    {id:'guidance',   label:'Leads',               count: c.guidance?.length||0},
+  ] : [
     {id:'guidance', label:'Leads & Actions', count: c.guidance?.length||0},
     {id:'post',     label:'Post',            count: c.post?1:0},
     {id:'account',  label:'Account',         count: c.account?1:0},
@@ -348,10 +369,14 @@ function renderCase(c) {
     {id:'network',  label:'Network',         count: (c.cross_posts?.length||0)+(c.username_search?.length||0)},
     {id:'darkweb',  label:'Dark Web',        count: c.dark_web?.length||0},
     {id:'flags',    label:'Red Flags',       count: c.red_flags?.length||0},
-    {id:'revsearch',label:'Reverse Search',   count: Object.values(c.auto_actions||{}).filter(v=>v.serpapi_results?.all_matches?.length>0).reduce((s,v)=>s+v.serpapi_results.all_matches.length,0)},
+    {id:'revsearch',label:'Reverse Search',  count: Object.values(c.auto_actions||{}).filter(v=>v.serpapi_results?.all_matches?.length>0).reduce((s,v)=>s+v.serpapi_results.all_matches.length,0)},
     {id:'autoact',  label:'Auto-Actions',    count: Object.keys(c.auto_actions||{}).length},
     {id:'graph',    label:'Network Graph',   count: 0},
   ];
+  // Default first tab for media cases
+  if (isMediaCase && activeTab === 'guidance' && c.discovered_accounts?.length) {
+    activeTab = 'discovered';
+  }
   document.getElementById('tabs').innerHTML = tabs.map(t => `
     <div class="tab ${activeTab===t.id?'active':''}" onclick="switchTab('${t.id}')">
       ${t.label}
@@ -488,6 +513,7 @@ function renderTabContent(c, tab) {
     case 'network':  el.innerHTML = renderNetwork(c); break;
     case 'darkweb':  el.innerHTML = renderDarkweb(c); break;
     case 'flags':    el.innerHTML = renderFlags(c); break;
+    case 'discovered':el.innerHTML = renderDiscoveredAccounts(c); break;
     case 'revsearch':el.innerHTML = renderReverseSearch(c); break;
     case 'autoact':  el.innerHTML = renderAutoActions(c); break;
     case 'graph':    renderNetworkGraph(c, el); break;
@@ -1689,12 +1715,174 @@ function fmtSize(bytes) {
   return bytes+' B';
 }
 
+// ── Mode toggle ───────────────────────────────────────────────────────────────
+let currentMode = 'url';
+let chosenFile = null;
+
+function setMode(mode) {
+  currentMode = mode;
+  document.getElementById('mode-url').classList.toggle('active', mode === 'url');
+  document.getElementById('mode-media').classList.toggle('active', mode === 'media');
+  document.getElementById('url-input').style.display = mode === 'url' ? '' : 'none';
+  document.getElementById('file-drop').style.display = mode === 'media' ? 'flex' : 'none';
+  document.getElementById('submit-btn').textContent = mode === 'media' ? 'Find All Accounts' : 'Investigate';
+}
+
+function onFileChosen(input) {
+  chosenFile = input.files[0] || null;
+  const label = document.getElementById('file-drop-label');
+  const chosen = document.getElementById('file-chosen');
+  if (chosenFile) {
+    label.style.display = 'none';
+    chosen.style.display = '';
+    chosen.textContent = chosenFile.name + ' (' + fmtSize(chosenFile.size) + ')';
+  } else {
+    label.style.display = '';
+    chosen.style.display = 'none';
+  }
+}
+
+async function postMediaCase(file, notes) {
+  const fd = new FormData();
+  fd.append('file', file);
+  if (notes) fd.append('notes', notes);
+  const r = await fetch(API + '/media-cases', { method: 'POST', body: fd });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+// ── Discovered accounts renderer ──────────────────────────────────────────────
+function renderDiscoveredAccounts(c) {
+  const accounts = c.discovered_accounts || [];
+  const inv = c.media_investigation || {};
+
+  if (c.status === 'running' || c.status === 'pending') {
+    return `<div style="color:var(--text2);padding:20px;text-align:center">
+      <div style="font-size:24px;margin-bottom:8px">⟳</div>
+      Running reverse image search and scraping discovered accounts…
+    </div>`;
+  }
+
+  if (!accounts.length) {
+    return `<div style="color:var(--text2);padding:20px">
+      No accounts found sharing this content. ${c.errors?.length ? 'Errors: ' + escHtml(c.errors.join(', ')) : ''}
+    </div>`;
+  }
+
+  const severityColor = s => s==='CRITICAL'?'var(--critical)':s==='HIGH'?'var(--high)':s==='MEDIUM'?'var(--medium)':'var(--low)';
+  const platformIcon = p => ({twitter:'𝕏', instagram:'📷', youtube:'▶', reddit:'🤖', tiktok:'♪', facebook:'f', web:'🌐'}[p]||'🌐');
+
+  let html = `<div style="margin-bottom:16px;font-size:13px;color:var(--text2)">
+    Found <strong style="color:var(--text)">${accounts.length} account(s)</strong> sharing this content
+    via reverse image search (${inv.raw_match_count||0} visual matches). Ranked by investigative priority.
+  </div>`;
+
+  // Summary bar
+  const critCount = accounts.filter(a=>a.severity_label==='CRITICAL').length;
+  const highCount = accounts.filter(a=>a.severity_label==='HIGH').length;
+  if (critCount || highCount) {
+    html += `<div style="background:rgba(248,81,73,.08);border:1px solid rgba(248,81,73,.25);border-radius:6px;padding:10px 14px;margin-bottom:16px;font-size:13px">
+      <strong style="color:var(--critical)">⚠ ${critCount} CRITICAL</strong> and
+      <strong style="color:var(--high)">${highCount} HIGH</strong> priority accounts require immediate investigation.
+    </div>`;
+  }
+
+  for (const a of accounts) {
+    const color = severityColor(a.severity_label);
+    const icon = platformIcon(a.platform);
+    const username = a.username || a.display_name || 'Unknown';
+    const profileUrl = a.account_url || a.post_url || '#';
+    const postUrl = a.post_url || profileUrl;
+    const thumbUrl = a.avatar || a.match_thumbnail;
+
+    html += `<div class="card" style="margin-bottom:10px;border-left:3px solid ${color}">
+      <div style="display:flex;gap:12px;align-items:flex-start">
+        <!-- Rank + severity -->
+        <div style="flex-shrink:0;text-align:center;min-width:52px">
+          <div style="font-size:20px;font-weight:700;color:${color}">#${a.rank}</div>
+          <div style="font-size:10px;font-weight:700;color:${color};background:${color}22;border-radius:3px;padding:1px 5px;margin-top:2px">${a.severity_label}</div>
+          <div style="font-size:11px;color:var(--text2);margin-top:2px">${a.severity_score}/100</div>
+        </div>
+
+        <!-- Avatar -->
+        ${thumbUrl ? `<img src="${escHtml(thumbUrl)}" style="width:44px;height:44px;border-radius:50%;object-fit:cover;flex-shrink:0;border:2px solid ${color}" onerror="this.style.display='none'">` : `<div style="width:44px;height:44px;border-radius:50%;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">${icon}</div>`}
+
+        <!-- Account info -->
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
+            <span style="font-size:13px;font-weight:600">${escHtml(a.display_name||username)}</span>
+            <span style="font-size:11px;color:var(--text2)">@${escHtml(username)}</span>
+            <span style="font-size:10px;background:var(--bg3);padding:1px 6px;border-radius:3px;color:var(--text2)">${icon} ${escHtml(a.platform)}</span>
+            ${a.verified ? `<span style="font-size:10px;color:var(--accent2)">✓ Verified</span>` : ''}
+            <span style="font-size:10px;color:var(--text2);margin-left:auto">via ${escHtml(a.match_engine||'')}</span>
+          </div>
+
+          ${a.bio ? `<div style="font-size:12px;color:var(--text2);margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(a.bio)}">${escHtml(a.bio.slice(0,100))}</div>` : ''}
+
+          <div style="display:flex;gap:16px;font-size:11px;color:var(--text2);margin-bottom:6px;flex-wrap:wrap">
+            ${a.followers!=null ? `<span><strong style="color:var(--text)">${fmt(a.followers)}</strong> ${a.platform==='reddit'?'karma':'followers'}</span>` : ''}
+            ${a.created_at ? `<span>Joined ${escHtml(a.created_at.slice(0,10))}</span>` : ''}
+            ${a.post_date ? `<span>Posted ${escHtml(a.post_date.slice(0,10))}</span>` : ''}
+            ${a.likes!=null ? `<span>❤ ${fmt(a.likes)}</span>` : ''}
+            ${a.views!=null ? `<span>👁 ${fmt(a.views)}</span>` : ''}
+          </div>
+
+          ${a.post_text ? `<div style="font-size:12px;background:var(--bg3);border-radius:4px;padding:6px 8px;margin-bottom:6px;border-left:2px solid ${color};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">"${escHtml(a.post_text.slice(0,120))}"</div>` : ''}
+
+          <!-- Score reasons -->
+          <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px">
+            ${(a.score_reasons||[]).map(r=>`<span style="font-size:10px;background:${color}22;color:${color};padding:1px 6px;border-radius:10px">${escHtml(r)}</span>`).join('')}
+          </div>
+
+          <!-- Action buttons -->
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button onclick="investigateAccount('${escHtml(profileUrl)}','${escHtml(a.platform+': @'+username)}')" style="background:var(--accent2);color:#fff;border:none;border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer">Full Investigation →</button>
+            <a href="${escHtml(profileUrl)}" target="_blank" class="media-link">View Profile</a>
+            ${postUrl !== profileUrl ? `<a href="${escHtml(postUrl)}" target="_blank" class="media-link">View Post</a>` : ''}
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  return html;
+}
+
+function investigateAccount(url, label) {
+  setMode('url');
+  document.getElementById('url-input').value = url;
+  document.getElementById('notes-input').value = label ? `From media investigation: ${label}` : '';
+  document.getElementById('submit-btn').click();
+}
+
 // ── Event wiring ─────────────────────────────────────────────────────────────
 document.getElementById('submit-btn').addEventListener('click', async () => {
-  const url = document.getElementById('url-input').value.trim();
   const notes = document.getElementById('notes-input').value.trim();
-  if (!url) return;
   const btn = document.getElementById('submit-btn');
+
+  if (currentMode === 'media') {
+    if (!chosenFile) { alert('Please select an image or video file first.'); return; }
+    btn.disabled = true;
+    btn.textContent = 'Uploading…';
+    try {
+      const c = await postMediaCase(chosenFile, notes);
+      document.getElementById('file-input').value = '';
+      chosenFile = null;
+      onFileChosen({files:[]});
+      document.getElementById('notes-input').value = '';
+      await refreshSidebar();
+      selectCase(c.id);
+    } catch(e) {
+      alert('Error: ' + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Find All Accounts';
+    }
+    return;
+  }
+
+  const url = document.getElementById('url-input').value.trim();
+  if (!url) return;
   btn.disabled = true;
   btn.textContent = 'Starting…';
   try {

@@ -51,7 +51,10 @@ FRONTEND = ROOT / "frontend"
 async def index():
     p = FRONTEND / "index.html"
     if p.exists():
-        return p.read_text()
+        return HTMLResponse(p.read_text(), headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+        })
     return HTMLResponse("<h1>OSINT Tool — frontend not found</h1>", status_code=500)
 
 

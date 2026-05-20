@@ -100,8 +100,8 @@ def tineye_search_url(image_url: str) -> str:
     return f"https://tineye.com/search?url={quote_plus(image_url)}"
 
 
-def run_reverse_search(media_file) -> Dict:
-    """Run reverse search on a media file. For video, use thumbnail if available."""
+def run_reverse_search(media_file, serpapi_key: str = "", case_dir: str = "") -> Dict:
+    """Run reverse search on a media file using SerpAPI (Google Lens + Yandex) if key is set."""
     mf = media_file if isinstance(media_file, dict) else media_file.model_dump()
     image_url = mf.get("source_url", "")
     result = {
@@ -112,10 +112,19 @@ def run_reverse_search(media_file) -> Dict:
             "tineye": tineye_search_url(image_url),
             "yandex": f"https://yandex.com/images/search?rpt=imageview&url={quote_plus(image_url)}",
         },
-        "yandex_results": None,
+        "serpapi_results": None,
     }
-    if mf.get("media_type") == "image":
-        result["yandex_results"] = yandex_reverse_search_by_url(image_url)
+
+    if serpapi_key and mf.get("media_type") in ("image", "video"):
+        try:
+            from backend.modules.reverse_search import run_reverse_search_for_media
+            result["serpapi_results"] = run_reverse_search_for_media(
+                mf, serpapi_key, case_dir or "."
+            )
+        except Exception as e:
+            logger.warning("SerpAPI reverse search failed: %s", e)
+            result["serpapi_error"] = str(e)
+
     return result
 
 
@@ -425,7 +434,7 @@ def generic_page_scrape(platform: str, url: str) -> Dict:
 
 # ── Main orchestrator ─────────────────────────────────────────────────────────
 
-def run_all_auto_actions(case) -> Dict[str, Any]:
+def run_all_auto_actions(case, serpapi_key: str = "", case_dir: str = "") -> Dict[str, Any]:
     """
     Run all automatable actions for a case.
     Returns a dict keyed by action_id with results.
@@ -446,7 +455,7 @@ def run_all_auto_actions(case) -> Dict[str, Any]:
     for mf in (case.media_files or []):
         mf_dict = mf.model_dump() if hasattr(mf, 'model_dump') else mf
         action_id = f"reverse_search_{mf_dict.get('filename', 'media')}"
-        results[action_id] = run_reverse_search(mf_dict)
+        results[action_id] = run_reverse_search(mf_dict, serpapi_key=serpapi_key, case_dir=case_dir)
         time.sleep(0.5)
 
     # 2. Twitter following list

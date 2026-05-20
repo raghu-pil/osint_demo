@@ -364,7 +364,8 @@ def run_pipeline(case_id: str, manager: CaseManager):
         manager.step_start(case, "auto_actions")
         try:
             from backend.modules.auto_actions import run_all_auto_actions
-            auto_results = run_all_auto_actions(case)
+            serpapi_key = config.get("serpapi_api_key", "")
+            auto_results = run_all_auto_actions(case, serpapi_key=serpapi_key, case_dir=str(case_dir))
             case.auto_actions = auto_results
 
             # Attach results to relevant guidance items

@@ -348,6 +348,7 @@ function renderCase(c) {
     {id:'network',  label:'Network',         count: (c.cross_posts?.length||0)+(c.username_search?.length||0)},
     {id:'darkweb',  label:'Dark Web',        count: c.dark_web?.length||0},
     {id:'flags',    label:'Red Flags',       count: c.red_flags?.length||0},
+    {id:'revsearch',label:'Reverse Search',   count: Object.values(c.auto_actions||{}).filter(v=>v.serpapi_results?.all_matches?.length>0).reduce((s,v)=>s+v.serpapi_results.all_matches.length,0)},
     {id:'autoact',  label:'Auto-Actions',    count: Object.keys(c.auto_actions||{}).length},
     {id:'graph',    label:'Network Graph',   count: 0},
   ];
@@ -392,15 +393,27 @@ function renderAutoResult(item) {
       if (!key.startsWith('reverse_search_')) continue;
       html += `<div style="margin-bottom:8px">`;
       html += `<div style="font-size:12px;font-weight:600;margin-bottom:4px">${escHtml(rs.filename||'media')}</div>`;
-      if (rs.yandex_results?.matches?.length > 0) {
-        html += `<div style="font-size:11px;color:var(--critical);font-weight:600;margin-bottom:4px">⚠ Found on ${rs.yandex_results.matches.length} other site(s):</div>`;
-        for (const m of rs.yandex_results.matches.slice(0,5)) {
-          html += `<div style="font-size:12px;margin:2px 0"><a href="${escHtml(m.url)}" target="_blank" style="color:var(--accent2)">${escHtml(m.title||m.domain||m.url)}</a> <span style="color:var(--text2);font-size:11px">(${escHtml(m.domain||'')})</span></div>`;
+      const sr = rs.serpapi_results;
+      if (sr?.all_matches?.length > 0) {
+        const earliest = sr.earliest_match;
+        if (earliest) html += `<div style="font-size:11px;color:var(--critical);font-weight:600;margin-bottom:4px">⚠ Earliest known appearance: ${escHtml(earliest.date)} on ${escHtml(earliest.source||earliest.link)}</div>`;
+        html += `<div style="font-size:11px;color:var(--critical);font-weight:600;margin-bottom:4px">Found on ${sr.all_matches.length} site(s) via Google Lens/Yandex</div>`;
+        html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">';
+        for (const m of sr.all_matches.slice(0,6)) {
+          html += `<div style="font-size:11px;background:var(--bg3);border-radius:4px;padding:4px 6px;max-width:200px">`;
+          if (m.thumbnail) html += `<img src="${escHtml(m.thumbnail)}" style="width:100%;height:60px;object-fit:cover;border-radius:3px;margin-bottom:3px;display:block">`;
+          html += `<a href="${escHtml(m.link)}" target="_blank" style="color:var(--accent2);font-size:10px">${escHtml((m.title||m.source||m.link).slice(0,40))}</a>`;
+          html += `<div style="color:var(--text2);font-size:10px">${escHtml(m.engine)} · ${escHtml(m.source||'')}</div>`;
+          html += '</div>';
         }
-      } else if (rs.yandex_results?.error) {
-        html += `<div style="font-size:11px;color:var(--text2)">Yandex: ${escHtml(rs.yandex_results.error)}</div>`;
+        html += '</div>';
+        html += `<a onclick="switchTab('revsearch')" style="cursor:pointer;color:var(--accent2);font-size:11px">See all in Reverse Search tab →</a>`;
+      } else if (sr?.error) {
+        html += `<div style="font-size:11px;color:var(--text2)">SerpAPI: ${escHtml(sr.error)}</div>`;
+      } else if (sr) {
+        html += `<div style="font-size:11px;color:var(--low)">✓ No visual matches found — image appears unique</div>`;
       } else {
-        html += `<div style="font-size:11px;color:var(--low)">✓ No matches found on Yandex — image appears unique</div>`;
+        html += `<div style="font-size:11px;color:var(--text2)">SerpAPI not configured — add serpapi_api_key to config.yaml for real results</div>`;
       }
       html += '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">';
       for (const [engine, url] of Object.entries(rs.search_links||{})) {
@@ -475,6 +488,7 @@ function renderTabContent(c, tab) {
     case 'network':  el.innerHTML = renderNetwork(c); break;
     case 'darkweb':  el.innerHTML = renderDarkweb(c); break;
     case 'flags':    el.innerHTML = renderFlags(c); break;
+    case 'revsearch':el.innerHTML = renderReverseSearch(c); break;
     case 'autoact':  el.innerHTML = renderAutoActions(c); break;
     case 'graph':    renderNetworkGraph(c, el); break;
     default:         el.innerHTML = '<p>Tab not found</p>';
@@ -893,6 +907,113 @@ function renderFlags(c) {
       </div>`).join('')}</div>`;
 }
 
+function renderReverseSearch(c) {
+  const actions = c.auto_actions || {};
+  const revEntries = Object.entries(actions).filter(([k]) => k.startsWith('reverse_search_'));
+
+  if (!revEntries.length) {
+    return `<div style="color:var(--text2);padding:20px">No media files found to reverse search. Run an investigation first.</div>`;
+  }
+
+  const hasKey = revEntries.some(([,v]) => v.serpapi_results && !v.serpapi_results?.error?.includes('No SerpAPI'));
+  let html = '';
+
+  if (!hasKey) {
+    html += `<div style="background:rgba(248,81,73,.08);border:1px solid rgba(248,81,73,.3);border-radius:6px;padding:12px 16px;margin-bottom:16px;font-size:13px">
+      <strong style="color:var(--critical)">SerpAPI not configured</strong> — add your key to <code>config.yaml</code>: <code>serpapi_api_key: "YOUR_KEY"</code><br>
+      <span style="color:var(--text2);font-size:12px">Free tier: 100 searches/month · <a href="https://serpapi.com" target="_blank" style="color:var(--accent2)">serpapi.com</a></span>
+      <div style="margin-top:8px;font-size:12px;color:var(--text2)">Manual search links are shown below while SerpAPI is not configured.</div>
+    </div>`;
+  }
+
+  for (const [key, result] of revEntries) {
+    const sr = result.serpapi_results;
+    const filename = result.filename || key.replace('reverse_search_', '');
+    const mediaType = result.media_type || '';
+    const allMatches = sr?.all_matches || [];
+    const earliest = sr?.earliest_match;
+
+    html += `<div class="card" style="margin-bottom:16px">`;
+    html += `<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">`;
+    html += `<div>
+      <div style="font-size:14px;font-weight:600">${escHtml(filename)}</div>
+      <div style="font-size:11px;color:var(--text2);margin-top:2px">${escHtml(mediaType)} · ${allMatches.length} match(es) found</div>
+    </div>`;
+    if (allMatches.length > 0) {
+      html += `<span style="font-size:11px;padding:3px 8px;border-radius:12px;background:rgba(248,81,73,.15);color:var(--critical);font-weight:600">⚠ Found elsewhere</span>`;
+    } else if (sr) {
+      html += `<span style="font-size:11px;padding:3px 8px;border-radius:12px;background:rgba(63,185,80,.1);color:var(--low);font-weight:600">✓ Unique</span>`;
+    }
+    html += '</div>';
+
+    // Earliest match highlight
+    if (earliest) {
+      html += `<div style="background:rgba(248,81,73,.1);border-left:3px solid var(--critical);padding:8px 12px;border-radius:0 4px 4px 0;margin-bottom:12px;font-size:12px">
+        <strong style="color:var(--critical)">Earliest known appearance: ${escHtml(earliest.date)}</strong><br>
+        <a href="${escHtml(earliest.link)}" target="_blank" style="color:var(--accent2)">${escHtml(earliest.title||earliest.source||earliest.link)}</a>
+        <span style="color:var(--text2)"> · ${escHtml(earliest.source||'')} · via ${escHtml(earliest.engine)}</span>
+      </div>`;
+    }
+
+    // Video: show frames searched
+    if (mediaType === 'video' && sr?.frames_searched?.length > 0) {
+      html += `<div style="font-size:11px;color:var(--text2);margin-bottom:8px">Searched ${sr.frames_searched.length} keyframe(s) from video</div>`;
+    }
+
+    // Results grid split by engine
+    if (allMatches.length > 0) {
+      const byEngine = {};
+      for (const m of allMatches) {
+        if (!byEngine[m.engine]) byEngine[m.engine] = [];
+        byEngine[m.engine].push(m);
+      }
+
+      for (const [engine, matches] of Object.entries(byEngine)) {
+        const engineLabel = engine === 'google_lens' ? 'Google Lens' : engine === 'yandex' ? 'Yandex' : engine;
+        const engineColor = engine === 'google_lens' ? '#4285f4' : engine === 'yandex' ? '#fc3f1d' : '#888';
+        html += `<div style="margin-bottom:14px">
+          <div style="font-size:12px;font-weight:600;color:${engineColor};margin-bottom:8px;border-bottom:1px solid var(--border);padding-bottom:4px">${escHtml(engineLabel)} — ${matches.length} match(es)</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">`;
+        for (const m of matches) {
+          html += `<div style="background:var(--bg3);border-radius:6px;overflow:hidden;border:1px solid var(--border)">`;
+          if (m.thumbnail) {
+            html += `<img src="${escHtml(m.thumbnail)}" style="width:100%;height:80px;object-fit:cover;display:block" onerror="this.style.display='none'">`;
+          }
+          html += `<div style="padding:6px 8px">
+            <a href="${escHtml(m.link)}" target="_blank" style="color:var(--accent2);font-size:11px;font-weight:600;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(m.title||'')}">
+              ${escHtml((m.title||m.source||m.link||'').slice(0,50))}
+            </a>
+            <div style="color:var(--text2);font-size:10px;margin-top:2px">${escHtml(m.source||(()=>{try{return new URL(m.link||'').hostname}catch{return''}})())}</div>
+            ${m.date ? `<div style="color:var(--medium);font-size:10px;margin-top:1px">${escHtml(m.date)}</div>` : ''}
+            ${m.snippet ? `<div style="color:var(--text2);font-size:10px;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(m.snippet)}">${escHtml(m.snippet.slice(0,60))}</div>` : ''}
+          </div></div>`;
+        }
+        html += '</div></div>';
+      }
+    } else if (sr?.error) {
+      html += `<div style="font-size:12px;color:var(--text2);margin-bottom:8px">Error: ${escHtml(sr.error)}</div>`;
+    } else if (sr) {
+      html += `<div style="font-size:12px;color:var(--low);margin-bottom:8px">No visual matches found — this image does not appear to exist elsewhere on the web.</div>`;
+    }
+
+    // Manual search links (always shown as fallback)
+    const manualLinks = sr?.manual_links || result.search_links || {};
+    if (Object.keys(manualLinks).length) {
+      html += `<div style="border-top:1px solid var(--border);padding-top:8px;margin-top:8px">
+        <div style="font-size:11px;color:var(--text2);margin-bottom:5px">Manual search:</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">`;
+      for (const [eng, url] of Object.entries(manualLinks)) {
+        html += `<a href="${escHtml(url)}" target="_blank" class="media-link">${escHtml(eng.replace(/_/g,' '))}</a>`;
+      }
+      html += '</div></div>';
+    }
+
+    html += '</div>';
+  }
+
+  return html;
+}
+
 function renderAutoActions(c) {
   const actions = c.auto_actions || {};
   if (!Object.keys(actions).length) {
@@ -917,14 +1038,19 @@ function renderAutoActions(c) {
 
     // Reverse search
     if (key.startsWith('reverse_search_')) {
-      const ys = result.yandex_results;
-      if (ys?.matches?.length) {
-        html += `<div style="font-size:12px;color:var(--critical);font-weight:600">Found on ${ys.matches.length} site(s):</div>`;
-        ys.matches.slice(0,5).forEach(m => {
-          html += `<div style="font-size:12px;margin:3px 0"><a href="${escHtml(m.url)}" target="_blank" style="color:var(--accent2)">${escHtml(m.title||m.url)}</a></div>`;
+      const sr = result.serpapi_results;
+      if (sr?.all_matches?.length) {
+        html += `<div style="font-size:12px;color:var(--critical);font-weight:600;margin-bottom:4px">Found on ${sr.all_matches.length} site(s) via Google Lens / Yandex</div>`;
+        sr.all_matches.slice(0,5).forEach(m => {
+          html += `<div style="font-size:12px;margin:3px 0"><span style="font-size:10px;background:var(--bg3);padding:1px 5px;border-radius:3px;margin-right:4px">${escHtml(m.engine)}</span><a href="${escHtml(m.link)}" target="_blank" style="color:var(--accent2)">${escHtml(m.title||m.source||m.link)}</a></div>`;
         });
+        html += `<a onclick="switchTab('revsearch')" style="cursor:pointer;color:var(--accent2);font-size:11px;margin-top:4px;display:inline-block">See all in Reverse Search tab →</a>`;
+      } else if (sr?.error) {
+        html += `<div style="font-size:12px;color:var(--text2)">Error: ${escHtml(sr.error)}</div>`;
+      } else if (sr) {
+        html += `<div style="font-size:12px;color:var(--low)">✓ No visual matches found — image appears unique.</div>`;
       } else {
-        html += `<div style="font-size:12px;color:var(--text2)">No duplicate appearances found.</div>`;
+        html += `<div style="font-size:12px;color:var(--text2)">Configure serpapi_api_key in config.yaml to enable real reverse search.</div>`;
       }
       html += '<div style="display:flex;gap:6px;margin-top:6px">';
       for (const [eng,url] of Object.entries(result.search_links||{})) {

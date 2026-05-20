@@ -1,0 +1,62 @@
+# ============================================================
+#  OSINT Tool — Configuration
+# ============================================================
+# Copy this file, fill in your keys, and pass with --config.
+# All fields are optional; the tool degrades gracefully when
+# keys are absent.
+
+# -----------------------------------------------------------
+#  SearXNG (self-hosted metasearch engine)
+#  Set up: https://docs.searxng.org/admin/installation.html
+#  Leave blank to skip SearXNG-based cross-post searches.
+# -----------------------------------------------------------
+searxng_url: ""          # e.g. http://localhost:8080
+
+# -----------------------------------------------------------
+#  Twitter / X API v2
+#  Get a Bearer Token at https://developer.twitter.com
+#  Without this the scraper falls back to syndication API
+#  and Nitter instances (may have rate limits).
+# -----------------------------------------------------------
+twitter_bearer_token: ""
+
+# -----------------------------------------------------------
+#  Nitter instance override (optional)
+#  If blank, the scraper auto-picks a live public instance.
+#  Self-host: https://github.com/zedeus/nitter
+# -----------------------------------------------------------
+nitter_instance: ""      # e.g. http://localhost:8081
+
+# -----------------------------------------------------------
+#  YouTube Data API v3
+#  Get at https://console.developers.google.com
+# -----------------------------------------------------------
+youtube_api_key: ""
+
+# -----------------------------------------------------------
+#  Have I Been Pwned (HIBP) API key
+#  Required for breach lookups: https://haveibeenpwned.com/API/Key
+# -----------------------------------------------------------
+hibp_api_key: ""
+
+# -----------------------------------------------------------
+#  IntelligenceX API key
+#  Optional: free tier works without, paid tier has more results
+#  https://intelx.io/account?tab=developer
+# -----------------------------------------------------------
+intelx_api_key: ""
+
+# -----------------------------------------------------------
+#  Sherlock
+#  Install: pip install sherlock-project
+#  Without installation, a built-in probe list is used.
+#  sherlock_timeout: max seconds to wait (default 90)
+# -----------------------------------------------------------
+sherlock_timeout: 90
+
+# -----------------------------------------------------------
+#  Skip flags (useful for quick runs)
+# -----------------------------------------------------------
+skip_sherlock: false
+skip_darkweb: false
+skip_crossposts: false

@@ -1,0 +1,1502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OSINT Investigation Tool</title>
+<style>
+:root {
+  --bg: #0d1117; --bg2: #161b22; --bg3: #21262d;
+  --border: #30363d; --text: #e6edf3; --text2: #8b949e;
+  --accent: #2ea043; --accent2: #1f6feb;
+  --critical: #f85149; --high: #f0883e; --medium: #d29922; --low: #3fb950; --info: #58a6ff;
+  --badge-h: 24px; --radius: 6px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
+
+/* ── Top bar ── */
+#topbar { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 12px 20px; display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+#topbar h1 { font-size: 14px; font-weight: 600; color: var(--text2); white-space: nowrap; }
+#topbar h1 span { color: var(--low); }
+#url-input { flex: 1; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: var(--radius); padding: 8px 12px; font-size: 14px; outline: none; }
+#url-input:focus { border-color: var(--accent2); }
+#submit-btn { background: var(--accent2); color: #fff; border: none; border-radius: var(--radius); padding: 8px 18px; font-size: 14px; cursor: pointer; white-space: nowrap; }
+#submit-btn:hover { opacity: .85; }
+#submit-btn:disabled { opacity: .5; cursor: default; }
+#notes-input { background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: var(--radius); padding: 8px 10px; font-size: 13px; width: 180px; outline: none; }
+
+/* ── Layout ── */
+#layout { display: flex; flex: 1; overflow: hidden; }
+
+/* ── Sidebar ── */
+#sidebar { width: 280px; flex-shrink: 0; border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+#sidebar-header { padding: 12px 14px; font-size: 12px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: .06em; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+#clear-all { background: none; border: none; color: var(--text2); font-size: 11px; cursor: pointer; }
+#clear-all:hover { color: var(--critical); }
+#case-list { overflow-y: auto; flex: 1; }
+.case-item { padding: 10px 14px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background .1s; }
+.case-item:hover { background: var(--bg3); }
+.case-item.active { background: var(--bg3); border-left: 3px solid var(--accent2); }
+.case-url { font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 230px; }
+.case-meta { font-size: 11px; color: var(--text2); margin-top: 3px; display: flex; gap: 6px; align-items: center; }
+.status-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.dot-pending { background: var(--text2); }
+.dot-running { background: var(--accent2); animation: pulse 1s infinite; }
+.dot-completed { background: var(--low); }
+.dot-failed { background: var(--critical); }
+@keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:.3 } }
+
+/* ── Main ── */
+#main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+#empty-state { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text2); gap: 8px; }
+#empty-state svg { opacity: .3; }
+#empty-state p { font-size: 14px; }
+
+/* ── Case view ── */
+#case-view { flex: 1; display: none; flex-direction: column; overflow: hidden; }
+#case-view.visible { display: flex; }
+
+/* ── Case header ── */
+#case-header { padding: 14px 20px; border-bottom: 1px solid var(--border); background: var(--bg2); flex-shrink: 0; }
+#case-title { font-size: 13px; font-weight: 600; color: var(--text2); margin-bottom: 4px; }
+#case-url-display { font-size: 14px; color: var(--accent2); word-break: break-all; }
+#case-status-row { display: flex; gap: 10px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+.badge { display: inline-flex; align-items: center; height: var(--badge-h); padding: 0 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+.badge-platform { background: var(--bg3); color: var(--text2); border: 1px solid var(--border); }
+.badge-critical { background: rgba(248,81,73,.15); color: var(--critical); border: 1px solid rgba(248,81,73,.4); }
+.badge-high { background: rgba(240,136,62,.15); color: var(--high); border: 1px solid rgba(240,136,62,.4); }
+.badge-medium { background: rgba(210,153,34,.15); color: var(--medium); border: 1px solid rgba(210,153,34,.4); }
+.badge-low { background: rgba(63,185,80,.15); color: var(--low); border: 1px solid rgba(63,185,80,.4); }
+.badge-minimal { background: var(--bg3); color: var(--text2); border: 1px solid var(--border); }
+.badge-running { background: rgba(31,111,235,.15); color: var(--accent2); border: 1px solid rgba(31,111,235,.4); }
+
+/* ── Progress steps ── */
+#progress-bar { padding: 10px 20px; border-bottom: 1px solid var(--border); display: flex; gap: 6px; flex-wrap: wrap; flex-shrink: 0; }
+.step-pill { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 12px; font-size: 11px; background: var(--bg3); color: var(--text2); border: 1px solid var(--border); }
+.step-pill.running { color: var(--accent2); border-color: var(--accent2); }
+.step-pill.completed { color: var(--low); border-color: var(--low); }
+.step-pill.failed { color: var(--critical); border-color: var(--critical); }
+.step-pill.skipped { opacity: .5; }
+
+/* ── Tabs ── */
+#tabs { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; padding: 0 20px; background: var(--bg2); overflow-x: auto; }
+.tab { padding: 10px 14px; font-size: 13px; cursor: pointer; color: var(--text2); border-bottom: 2px solid transparent; white-space: nowrap; display: flex; align-items: center; gap: 5px; }
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--text); border-bottom-color: var(--accent2); }
+.tab-badge { background: var(--bg3); color: var(--text2); border-radius: 10px; padding: 1px 6px; font-size: 10px; }
+.tab.active .tab-badge { background: var(--accent2); color: #fff; }
+
+/* ── Tab content ── */
+#tab-content { flex: 1; overflow-y: auto; padding: 20px; }
+
+/* ── Guidance panel ── */
+#guidance-panel { margin-bottom: 20px; }
+.guidance-title { font-size: 13px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+.guidance-item { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 8px; border-left: 3px solid transparent; }
+.guidance-item.critical { border-left-color: var(--critical); }
+.guidance-item.high { border-left-color: var(--high); }
+.guidance-item.medium { border-left-color: var(--medium); }
+.guidance-item.low { border-left-color: var(--low); }
+.guidance-item.info { border-left-color: var(--info); }
+.g-header { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 4px; }
+.g-priority { font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 3px; flex-shrink: 0; }
+.g-priority.critical { background: rgba(248,81,73,.2); color: var(--critical); }
+.g-priority.high { background: rgba(240,136,62,.2); color: var(--high); }
+.g-priority.medium { background: rgba(210,153,34,.2); color: var(--medium); }
+.g-priority.low { background: rgba(63,185,80,.2); color: var(--low); }
+.g-priority.info { background: rgba(88,166,255,.2); color: var(--info); }
+.g-title { font-size: 13px; font-weight: 600; color: var(--text); }
+.g-detail { font-size: 12px; color: var(--text2); margin: 4px 0; line-height: 1.5; }
+.g-action { font-size: 12px; color: var(--accent2); background: rgba(31,111,235,.1); padding: 6px 10px; border-radius: 4px; margin-top: 6px; }
+.g-action::before { content: "→ Action: "; font-weight: 600; }
+.g-link { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; font-size: 12px; color: var(--accent2); text-decoration: none; background: rgba(31,111,235,.1); padding: 4px 10px; border-radius: 4px; }
+.g-link:hover { background: rgba(31,111,235,.2); }
+
+/* ── Cards ── */
+.card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 14px; }
+.card-title { font-size: 12px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 10px; }
+.kv { display: grid; grid-template-columns: 160px 1fr; gap: 4px 10px; font-size: 13px; }
+.kv-key { color: var(--text2); }
+.kv-val { color: var(--text); word-break: break-all; }
+.kv-val a { color: var(--accent2); }
+
+/* ── Media grid ── */
+.media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.media-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.media-thumb { width: 100%; height: 140px; object-fit: cover; background: var(--bg3); display: flex; align-items: center; justify-content: center; color: var(--text2); font-size: 32px; }
+.media-info { padding: 10px; }
+.media-filename { font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.media-meta { font-size: 11px; color: var(--text2); line-height: 1.6; }
+.media-hash { font-family: monospace; font-size: 10px; color: var(--text2); word-break: break-all; }
+.media-gps { margin-top: 6px; padding: 4px 8px; background: rgba(63,185,80,.1); border-radius: 3px; font-size: 11px; color: var(--low); }
+.media-gps a { color: var(--low); }
+.media-links { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.media-link { font-size: 10px; padding: 2px 7px; border-radius: 3px; background: var(--bg3); color: var(--text2); text-decoration: none; border: 1px solid var(--border); }
+.media-link:hover { color: var(--accent2); border-color: var(--accent2); }
+
+/* ── Tables ── */
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; padding: 8px 10px; font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; border-bottom: 1px solid var(--border); }
+td { padding: 8px 10px; border-bottom: 1px solid var(--border); color: var(--text); vertical-align: top; }
+tr:last-child td { border-bottom: none; }
+td a { color: var(--accent2); }
+.found-tag { background: rgba(63,185,80,.15); color: var(--low); padding: 2px 7px; border-radius: 3px; font-size: 11px; font-weight: 600; }
+.notfound-tag { background: var(--bg3); color: var(--text2); padding: 2px 7px; border-radius: 3px; font-size: 11px; }
+
+/* ── Red flags ── */
+.flag { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); align-items: flex-start; }
+.flag:last-child { border-bottom: none; }
+.flag-sev { flex-shrink: 0; padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 700; }
+.flag-desc { font-size: 13px; color: var(--text); }
+.flag-evidence { font-size: 11px; color: var(--text2); font-family: monospace; margin-top: 2px; }
+
+/* ── Identity ── */
+.id-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 10px; }
+.id-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.id-type { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 3px; background: rgba(31,111,235,.15); color: var(--accent2); }
+.id-value { font-size: 14px; font-weight: 600; font-family: monospace; color: var(--text); }
+
+/* ── Engagement stats ── */
+.stats-row { display: flex; gap: 20px; margin: 8px 0; flex-wrap: wrap; }
+.stat { display: flex; flex-direction: column; gap: 2px; }
+.stat-val { font-size: 20px; font-weight: 700; color: var(--text); }
+.stat-label { font-size: 11px; color: var(--text2); }
+
+/* ── OCR text ── */
+.ocr-box { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 10px; font-family: monospace; font-size: 12px; color: var(--text); white-space: pre-wrap; max-height: 200px; overflow-y: auto; margin-top: 8px; }
+
+/* ── Network graph ── */
+#graph-container { position: relative; width: 100%; height: 100%; overflow: hidden; background: var(--bg); }
+#graph-canvas { display: block; cursor: grab; }
+#graph-canvas:active { cursor: grabbing; }
+#graph-detail { position: absolute; top: 12px; right: 12px; width: 280px; background: var(--bg2);
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; font-size: 12px;
+  max-height: calc(100% - 24px); overflow-y: auto; display: none; }
+#graph-detail.visible { display: block; }
+#graph-legend { position: absolute; bottom: 12px; left: 12px; display: flex; flex-wrap: wrap; gap: 8px; }
+.legend-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text2); }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+#graph-controls { position: absolute; top: 12px; left: 12px; display: flex; gap: 6px; }
+.graph-btn { background: var(--bg2); border: 1px solid var(--border); color: var(--text2);
+  padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer; }
+.graph-btn:hover { color: var(--text); border-color: var(--text2); }
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<!-- Top bar -->
+<div id="topbar">
+  <h1>OSINT <span>Tool</span></h1>
+  <input id="url-input" type="text" placeholder="Paste social media URL (Twitter, Instagram, Reddit, YouTube, TikTok, Telegram…)" />
+  <input id="notes-input" type="text" placeholder="Case notes (optional)" />
+  <button id="submit-btn">Investigate</button>
+</div>
+
+<!-- Layout -->
+<div id="layout">
+  <!-- Sidebar -->
+  <div id="sidebar">
+    <div id="sidebar-header">
+      Cases
+      <button id="clear-all" title="Delete all cases">Clear all</button>
+    </div>
+    <div id="case-list"></div>
+  </div>
+
+  <!-- Main -->
+  <div id="main">
+    <div id="empty-state">
+      <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <p>Enter a URL above to start an investigation</p>
+    </div>
+    <div id="case-view">
+      <div id="case-header">
+        <div id="case-title">Investigation</div>
+        <div id="case-url-display"></div>
+        <div id="case-status-row"></div>
+      </div>
+      <div id="progress-bar"></div>
+      <div id="tabs"></div>
+      <div id="tab-content"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '/api';
+let currentCaseId = null;
+let pollTimer = null;
+let activeTab = 'guidance';
+
+// ── API helpers ───────────────────────────────────────────────────────────────
+async function api(path, opts={}) {
+  const r = await fetch(API + path, opts);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+async function postCase(url, notes) {
+  return api('/cases', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({url, notes: notes||null})
+  });
+}
+
+async function getCase(id) { return api('/cases/' + id); }
+async function listCases() { return api('/cases'); }
+async function deleteAllCases() {
+  const cases = await listCases();
+  await Promise.all(cases.map(c => fetch(API+'/cases/'+c.id, {method:'DELETE'})));
+}
+
+// ── Sidebar ───────────────────────────────────────────────────────────────────
+function renderSidebar(cases) {
+  const el = document.getElementById('case-list');
+  if (!cases.length) { el.innerHTML = '<div style="padding:20px;color:var(--text2);font-size:12px;text-align:center">No cases yet</div>'; return; }
+  el.innerHTML = cases.map(c => {
+    const d = new Date(c.created_at);
+    const timeStr = d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    const risk = c.risk_label || 'MINIMAL';
+    return `
+      <div class="case-item ${c.id===currentCaseId?'active':''}" onclick="selectCase('${c.id}')">
+        <div class="case-url">${escHtml(c.url)}</div>
+        <div class="case-meta">
+          <span class="status-dot dot-${c.status}"></span>
+          <span>${c.status}</span>
+          ${c.platform?`<span>· ${c.platform}</span>`:''}
+          ${c.risk_score>0?`<span class="badge badge-${risk.toLowerCase()}" style="font-size:10px;height:18px">${risk} ${c.risk_score}</span>`:''}
+          <span style="margin-left:auto">${timeStr}</span>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+async function refreshSidebar() {
+  try {
+    const cases = await listCases();
+    renderSidebar(cases);
+  } catch(e) {}
+}
+
+// ── Select + poll case ────────────────────────────────────────────────────────
+async function selectCase(id) {
+  currentCaseId = id;
+  clearInterval(pollTimer);
+  activeTab = 'guidance';
+  try {
+    const c = await getCase(id);
+    renderCase(c);
+    if (c.status === 'running' || c.status === 'pending') {
+      pollTimer = setInterval(async () => {
+        try {
+          const fresh = await getCase(id);
+          renderCase(fresh);
+          if (fresh.status !== 'running' && fresh.status !== 'pending') {
+            clearInterval(pollTimer);
+            refreshSidebar();
+          }
+        } catch(e) { clearInterval(pollTimer); }
+      }, 2000);
+    }
+    refreshSidebar();
+  } catch(e) { console.error(e); }
+}
+
+// ── Render case ───────────────────────────────────────────────────────────────
+function renderCase(c) {
+  document.getElementById('empty-state').style.display = 'none';
+  const cv = document.getElementById('case-view');
+  cv.classList.add('visible');
+
+  // Header
+  document.getElementById('case-title').textContent = `Case ${c.id}`;
+  document.getElementById('case-url-display').textContent = c.url;
+
+  const sr = document.getElementById('case-status-row');
+  const risk = c.risk_label || 'MINIMAL';
+  sr.innerHTML = `
+    <span class="badge badge-${c.status==='running'?'running':c.status==='completed'?'low':c.status==='failed'?'critical':'minimal'}">${c.status.toUpperCase()}</span>
+    ${c.platform ? `<span class="badge badge-platform">${c.platform}</span>` : ''}
+    ${c.risk_score>0 ? `<span class="badge badge-${risk.toLowerCase()}">RISK: ${risk} (${c.risk_score})</span>` : ''}
+    ${c.media_files?.length ? `<span class="badge badge-platform">${c.media_files.length} media</span>` : ''}
+    ${c.guidance?.length ? `<span class="badge badge-high">${c.guidance.filter(g=>g.severity==='critical'||g.severity==='high').length} priority leads</span>` : ''}
+  `;
+
+  // Progress steps
+  const pb = document.getElementById('progress-bar');
+  pb.innerHTML = (c.steps||[]).map(s => `
+    <span class="step-pill ${s.status}" title="${s.message||s.label}">
+      ${s.status==='completed'?'✓':s.status==='failed'?'✗':s.status==='running'?'⟳':s.status==='skipped'?'—':'○'}
+      ${s.label}
+    </span>`).join('');
+
+  // Tabs
+  const enr = c.account_enrichment || {};
+  const tabs = [
+    {id:'guidance', label:'Leads & Actions', count: c.guidance?.length||0},
+    {id:'post',     label:'Post',            count: c.post?1:0},
+    {id:'account',  label:'Account',         count: c.account?1:0},
+    {id:'timeline', label:'Timeline',        count: enr.post_count_scraped||0},
+    {id:'media',    label:'Media',           count: c.media_files?.length||0},
+    {id:'identity', label:'Identity',        count: (c.identity_pivots?.length||0)+(enr.bio_emails?.length||0)+(enr.bio_links?.filter(l=>l.is_social)?.length||0)},
+    {id:'network',  label:'Network',         count: (c.cross_posts?.length||0)+(c.username_search?.length||0)},
+    {id:'darkweb',  label:'Dark Web',        count: c.dark_web?.length||0},
+    {id:'flags',    label:'Red Flags',       count: c.red_flags?.length||0},
+    {id:'autoact',  label:'Auto-Actions',    count: Object.keys(c.auto_actions||{}).length},
+    {id:'graph',    label:'Network Graph',   count: 0},
+  ];
+  document.getElementById('tabs').innerHTML = tabs.map(t => `
+    <div class="tab ${activeTab===t.id?'active':''}" onclick="switchTab('${t.id}')">
+      ${t.label}
+      ${t.count>0?`<span class="tab-badge">${t.count}</span>`:''}
+    </div>`).join('');
+
+  renderTabContent(c, activeTab);
+}
+
+function switchTab(tabId) {
+  activeTab = tabId;
+  if (graphSimulation && tabId !== 'graph') { graphSimulation.cancel(); graphSimulation = null; }
+  const tc = document.getElementById('tab-content');
+  if (tabId === 'graph') {
+    tc.style.padding = '0';
+    tc.style.overflow = 'hidden';
+  } else {
+    tc.style.padding = '20px';
+    tc.style.overflow = 'auto';
+  }
+  if (!currentCaseId) return;
+  getCase(currentCaseId).then(c => {
+    renderCase(c);
+  });
+}
+
+// ── Auto result renderer (shown inline under guidance items) ─────────────────
+function renderAutoResult(item) {
+  const r = item.auto_result;
+  if (!r) return '';
+  const title = item.title.toLowerCase();
+
+  let html = '<div style="margin-top:10px;border-top:1px solid var(--border);padding-top:10px">';
+  html += '<div style="font-size:11px;font-weight:600;color:var(--text2);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">⚡ Auto-Investigation Results</div>';
+
+  // Reverse image search results
+  if (title.includes('reverse image') || title.includes('media file')) {
+    for (const [key, rs] of Object.entries(r)) {
+      if (!key.startsWith('reverse_search_')) continue;
+      html += `<div style="margin-bottom:8px">`;
+      html += `<div style="font-size:12px;font-weight:600;margin-bottom:4px">${escHtml(rs.filename||'media')}</div>`;
+      if (rs.yandex_results?.matches?.length > 0) {
+        html += `<div style="font-size:11px;color:var(--critical);font-weight:600;margin-bottom:4px">⚠ Found on ${rs.yandex_results.matches.length} other site(s):</div>`;
+        for (const m of rs.yandex_results.matches.slice(0,5)) {
+          html += `<div style="font-size:12px;margin:2px 0"><a href="${escHtml(m.url)}" target="_blank" style="color:var(--accent2)">${escHtml(m.title||m.domain||m.url)}</a> <span style="color:var(--text2);font-size:11px">(${escHtml(m.domain||'')})</span></div>`;
+        }
+      } else if (rs.yandex_results?.error) {
+        html += `<div style="font-size:11px;color:var(--text2)">Yandex: ${escHtml(rs.yandex_results.error)}</div>`;
+      } else {
+        html += `<div style="font-size:11px;color:var(--low)">✓ No matches found on Yandex — image appears unique</div>`;
+      }
+      html += '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">';
+      for (const [engine, url] of Object.entries(rs.search_links||{})) {
+        html += `<a href="${escHtml(url)}" target="_blank" class="media-link">${engine.replace('_',' ')}</a>`;
+      }
+      html += '</div></div>';
+    }
+  }
+
+  // Twitter following list
+  if (title.includes('follows') || title.includes('following')) {
+    if (r.found && r.accounts?.length > 0) {
+      html += `<div style="font-size:11px;color:var(--low);font-weight:600;margin-bottom:6px">✓ Retrieved ${r.accounts.length} account(s) they follow:</div>`;
+      for (const acct of r.accounts) {
+        html += `<div style="padding:5px 0;border-bottom:1px solid var(--border);font-size:12px">
+          <a href="${escHtml(acct.url||'#')}" target="_blank" style="color:var(--accent2);font-weight:600">@${escHtml(acct.username||'?')}</a>
+          ${acct.display_name?`<span style="color:var(--text2)"> · ${escHtml(acct.display_name)}</span>`:''}
+          ${acct.bio?`<div style="color:var(--text2);font-size:11px;margin-top:2px">${escHtml(acct.bio.slice(0,100))}</div>`:''}
+        </div>`;
+      }
+    } else {
+      html += `<div style="font-size:11px;color:var(--text2)">Could not auto-retrieve following list (Twitter blocks automated access).</div>`;
+      if (r.manual_url) {
+        html += `<a href="${escHtml(r.manual_url)}" target="_blank" class="g-link" style="margin-top:6px">View following list manually ↗</a>`;
+      }
+    }
+  }
+
+  // Platform profile results (Linktree, TikTok, Blogger, etc.)
+  const platform = r.platform || '';
+  if (platform && r.found !== undefined && !title.includes('reverse') && !title.includes('following')) {
+    if (r.found) {
+      html += `<div style="font-size:11px;color:var(--low);font-weight:600;margin-bottom:6px">✓ ${escHtml(platform)} profile fetched:</div>`;
+      if (r.page_title || r.blog_title) {
+        html += `<div style="font-size:12px;margin-bottom:4px"><strong>${escHtml(r.page_title||r.blog_title)}</strong></div>`;
+      }
+      if (r.nickname) html += `<div style="font-size:12px">Name: ${escHtml(r.nickname)}</div>`;
+      if (r.bio || r.description) html += `<div style="font-size:12px;color:var(--text2);margin:4px 0">${escHtml((r.bio||r.description||'').slice(0,200))}</div>`;
+      if (r.followers != null) html += `<div style="font-size:12px">Followers: ${fmt(r.followers)}</div>`;
+      if (r.bio_link) html += `<div style="font-size:12px">Bio link: <a href="${escHtml(r.bio_link)}" target="_blank" style="color:var(--accent2)">${escHtml(r.bio_link)}</a></div>`;
+      if (r.links?.length > 0) {
+        html += `<div style="font-size:11px;font-weight:600;color:var(--text2);margin:6px 0 4px">Links found:</div>`;
+        for (const link of r.links.slice(0,10)) {
+          html += `<div style="margin:3px 0;font-size:12px"><a href="${escHtml(link.url)}" target="_blank" style="color:var(--accent2)">${escHtml(link.title||link.url)}</a> <span style="color:var(--text2);font-size:11px">(${escHtml(link.domain||'')})</span></div>`;
+        }
+      }
+      if (r.posts?.length > 0) {
+        html += `<div style="font-size:11px;font-weight:600;color:var(--text2);margin:6px 0 4px">Recent posts:</div>`;
+        for (const post of r.posts.slice(0,5)) {
+          html += `<div style="margin:3px 0;font-size:12px"><a href="${escHtml(post.url||'#')}" target="_blank" style="color:var(--accent2)">${escHtml(post.title)}</a></div>`;
+        }
+      }
+    } else {
+      html += `<div style="font-size:11px;color:var(--text2)">Profile not accessible: ${escHtml(r.error||'no data returned')}</div>`;
+    }
+  }
+
+  html += '</div>';
+  return html;
+}
+
+// ── Tab content renderers ────────────────────────────────────────────────────
+function renderTabContent(c, tab) {
+  const el = document.getElementById('tab-content');
+  switch(tab) {
+    case 'guidance': el.innerHTML = renderGuidance(c); break;
+    case 'post':     el.innerHTML = renderPost(c); break;
+    case 'account':  el.innerHTML = renderAccount(c); break;
+    case 'timeline': el.innerHTML = renderTimeline(c); break;
+    case 'media':    el.innerHTML = renderMedia(c); break;
+    case 'identity': el.innerHTML = renderIdentity(c); break;
+    case 'network':  el.innerHTML = renderNetwork(c); break;
+    case 'darkweb':  el.innerHTML = renderDarkweb(c); break;
+    case 'flags':    el.innerHTML = renderFlags(c); break;
+    case 'autoact':  el.innerHTML = renderAutoActions(c); break;
+    case 'graph':    renderNetworkGraph(c, el); break;
+    default:         el.innerHTML = '<p>Tab not found</p>';
+  }
+}
+
+function renderGuidance(c) {
+  const items = c.guidance || [];
+  if (c.status === 'running' || c.status === 'pending') {
+    return `<div style="color:var(--text2);padding:30px;text-align:center">
+      <div style="font-size:24px;margin-bottom:8px">⟳</div>
+      <div>Investigation in progress… results will appear here</div>
+    </div>`;
+  }
+  if (!items.length) return '<div style="color:var(--text2);padding:20px">No guidance generated yet.</div>';
+
+  const critical = items.filter(i=>i.severity==='critical');
+  const high = items.filter(i=>i.severity==='high');
+  const rest = items.filter(i=>i.severity!=='critical'&&i.severity!=='high');
+
+  let html = '';
+  if (critical.length||high.length) {
+    html += `<div style="font-size:13px;font-weight:600;color:var(--critical);margin-bottom:10px">
+      ⚠ ${critical.length+high.length} HIGH PRIORITY ACTION(S) REQUIRED
+    </div>`;
+  }
+
+  for (const item of items) {
+    const sev = item.severity;
+    html += `
+      <div class="guidance-item ${sev}">
+        <div class="g-header">
+          <span class="g-priority ${sev}">${sev.toUpperCase()}</span>
+          <div class="g-title">${escHtml(item.title)}</div>
+          ${item.auto_status ? `<span style="font-size:10px;padding:2px 6px;border-radius:3px;background:${item.auto_status==='done'?'rgba(63,185,80,.15)':'rgba(210,153,34,.15)'};color:${item.auto_status==='done'?'var(--low)':'var(--medium)'}">✓ auto-checked</span>` : ''}
+        </div>
+        ${item.detail ? `<div class="g-detail">${escHtml(item.detail)}</div>` : ''}
+        ${item.action ? `<div class="g-action">${escHtml(item.action)}</div>` : ''}
+        ${item.pivot_url ? `<a class="g-link" href="${escHtml(item.pivot_url)}" target="_blank">↗ ${escHtml(item.pivot_label||item.pivot_url)}</a>` : ''}
+        ${item.auto_result ? renderAutoResult(item) : ''}
+      </div>`;
+  }
+
+  // Manual search links
+  if (c.manual_searches?.length) {
+    html += `<div class="card" style="margin-top:16px">
+      <div class="card-title">Manual Investigation Links</div>`;
+    for (const s of c.manual_searches) {
+      html += `<div style="margin-bottom:8px"><a href="${escHtml(s.url)}" target="_blank" style="color:var(--accent2);font-size:13px">${escHtml(s.label||s.url)}</a></div>`;
+    }
+    html += '</div>';
+  }
+
+  if (c.errors?.length) {
+    html += `<div class="card" style="margin-top:14px;border-color:var(--border)">
+      <div class="card-title" style="color:var(--high)">Errors / Warnings</div>
+      ${c.errors.map(e=>`<div style="font-size:12px;color:var(--text2);margin-bottom:4px">• ${escHtml(e)}</div>`).join('')}
+    </div>`;
+  }
+
+  return html;
+}
+
+function renderPost(c) {
+  const p = c.post;
+  if (!p) return `<div style="color:var(--text2);padding:20px">No post data available. ${c.errors?.length?'Check errors in the Leads tab.':''}</div>`;
+
+  const eng = p.engagement || {};
+  return `
+    <div class="card">
+      <div class="card-title">Post Content</div>
+      ${p.text ? `<div style="font-size:14px;line-height:1.6;margin-bottom:14px;padding:12px;background:var(--bg);border-radius:4px">${escHtml(p.text)}</div>` : ''}
+      <div class="stats-row">
+        ${eng.likes!=null?`<div class="stat"><div class="stat-val">${fmt(eng.likes)}</div><div class="stat-label">Likes</div></div>`:''}
+        ${eng.reposts!=null?`<div class="stat"><div class="stat-val">${fmt(eng.reposts)}</div><div class="stat-label">Reposts</div></div>`:''}
+        ${eng.replies!=null?`<div class="stat"><div class="stat-val">${fmt(eng.replies)}</div><div class="stat-label">Replies</div></div>`:''}
+        ${eng.views!=null?`<div class="stat"><div class="stat-val">${fmt(eng.views)}</div><div class="stat-label">Views</div></div>`:''}
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Post Metadata</div>
+      <div class="kv">
+        <span class="kv-key">Platform</span><span class="kv-val">${escHtml(p.platform||'–')}</span>
+        <span class="kv-key">Post ID</span><span class="kv-val" style="font-family:monospace">${escHtml(p.post_id||'–')}</span>
+        <span class="kv-key">Published</span><span class="kv-val">${p.created_at ? new Date(p.created_at).toLocaleString() : '–'}</span>
+        <span class="kv-key">Author</span><span class="kv-val">${escHtml(p.author_username||'–')}${p.author_display_name?` (${escHtml(p.author_display_name)})`:''}</span>
+        <span class="kv-key">Language</span><span class="kv-val">${escHtml(p.language||'–')}</span>
+        <span class="kv-key">URL</span><span class="kv-val"><a href="${escHtml(p.url||'#')}" target="_blank">${escHtml(p.url||'–')}</a></span>
+      </div>
+    </div>
+    ${p.hashtags?.length ? `<div class="card"><div class="card-title">Hashtags</div><div style="font-size:13px">${p.hashtags.map(h=>`<span style="margin:2px;display:inline-block;background:var(--bg3);padding:2px 8px;border-radius:3px">#${escHtml(h)}</span>`).join('')}</div></div>` : ''}
+    ${p.mentions?.length ? `<div class="card"><div class="card-title">Mentions</div><div style="font-size:13px">${p.mentions.map(m=>`<span style="margin:2px;display:inline-block;background:rgba(31,111,235,.1);padding:2px 8px;border-radius:3px;color:var(--accent2)">@${escHtml(m)}</span>`).join('')}</div></div>` : ''}
+    ${p.embedded_urls?.length ? `<div class="card"><div class="card-title">Embedded URLs</div>${p.embedded_urls.map(u=>`<div style="margin:4px 0;font-size:13px"><a href="${escHtml(u)}" target="_blank">${escHtml(u)}</a></div>`).join('')}</div>` : ''}
+    ${p.media?.length ? `<div class="card"><div class="card-title">Media (from post metadata)</div>${p.media.map(m=>`
+      <div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px">
+        <span style="color:var(--text2)">${m.type||'image'}</span>
+        <a href="${escHtml(m.url||'#')}" target="_blank" style="color:var(--accent2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(m.url||'–')}</a>
+        ${m.dimensions?`<span style="color:var(--text2)">${m.dimensions}</span>`:''}
+      </div>`).join('')}</div>` : ''}
+  `;
+}
+
+function renderAccount(c) {
+  const a = c.account;
+  const enr = c.account_enrichment || {};
+  if (!a) return '<div style="color:var(--text2);padding:20px">No account data available.</div>';
+  const m = a.metrics || {};
+  const patterns = enr.posting_patterns || {};
+
+  let html = `
+    <div class="card">
+      <div style="display:flex;gap:14px;align-items:flex-start">
+        ${a.profile_image ? `<img src="${escHtml(a.profile_image)}" style="width:64px;height:64px;border-radius:50%;border:2px solid var(--border)">` : '<div style="width:64px;height:64px;border-radius:50%;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:24px">👤</div>'}
+        <div style="flex:1">
+          <div style="font-size:18px;font-weight:700">${escHtml(a.display_name||a.username||'–')}</div>
+          <div style="color:var(--text2);font-size:13px">@${escHtml(a.username||'?')} · ${escHtml(a.platform||'?')}</div>
+          ${a.verified?'<span class="badge badge-low" style="margin-top:4px">✓ Verified</span>':''}
+        </div>
+      </div>
+      ${a.bio?`<div style="margin-top:12px;font-size:13px;line-height:1.5;color:var(--text2);padding:10px;background:var(--bg);border-radius:4px">${escHtml(a.bio)}</div>`:''}
+      <div class="stats-row" style="margin-top:12px">
+        ${m.followers!=null?`<div class="stat"><div class="stat-val">${fmt(m.followers)}</div><div class="stat-label">Followers</div></div>`:''}
+        ${(enr.vx_following_count??m.following)!=null?`<div class="stat"><div class="stat-val" style="${enr.vx_following_count<20?'color:var(--high)':''}">${fmt(enr.vx_following_count??m.following)}</div><div class="stat-label">Following${enr.vx_following_count<20?' ⚠':''}</div></div>`:''}
+        ${(enr.vx_tweet_count??m.post_count)!=null?`<div class="stat"><div class="stat-val">${fmt(enr.vx_tweet_count??m.post_count)}</div><div class="stat-label">Total Posts</div></div>`:''}
+        ${enr.post_count_scraped?`<div class="stat"><div class="stat-val">${enr.post_count_scraped}</div><div class="stat-label">Timeline scraped</div></div>`:''}
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Account Details</div>
+      <div class="kv">
+        ${enr.vx_display_name?`<span class="kv-key">Real display name</span><span class="kv-val" style="font-weight:600;color:var(--low)">${escHtml(enr.vx_display_name)}</span>`:''}
+        <span class="kv-key">User ID</span><span class="kv-val" style="font-family:monospace">${escHtml(enr.vx_user_id||a.user_id||'–')}</span>
+        <span class="kv-key">Account created</span><span class="kv-val">${(enr.vx_created_at||a.created_at) ? new Date(enr.vx_created_at||a.created_at).toLocaleString() : '–'}</span>
+        <span class="kv-key">Location</span><span class="kv-val">${escHtml(enr.vx_location||a.location||'–')}</span>
+        <span class="kv-key">Total tweets (ever)</span><span class="kv-val">${enr.vx_tweet_count!=null?fmt(enr.vx_tweet_count):'–'}</span>
+        <span class="kv-key">Protected account</span><span class="kv-val">${enr.vx_protected!=null?(enr.vx_protected?'Yes':'No'):'–'}</span>
+        <span class="kv-key">Website</span><span class="kv-val">${a.website?`<a href="${escHtml(a.website)}" target="_blank">${escHtml(a.website)}</a>`:'–'}</span>
+      </div>
+    </div>`;
+
+  // Posting behavior
+  if (patterns.timezone_inference || patterns.posts_per_day != null) {
+    html += `<div class="card">
+      <div class="card-title">Posting Behavior</div>
+      <div class="kv">
+        ${patterns.posts_per_day!=null?`<span class="kv-key">Posts/day</span><span class="kv-val">${patterns.posts_per_day}</span>`:''}
+        ${patterns.peak_hour_utc!=null?`<span class="kv-key">Peak hour (UTC)</span><span class="kv-val">${patterns.peak_hour_utc}:00</span>`:''}
+        ${patterns.timezone_inference?`<span class="kv-key">Timezone inference</span><span class="kv-val">${escHtml(patterns.timezone_inference)}</span>`:''}
+        ${patterns.bot_like_cadence!=null?`<span class="kv-key">Bot-like cadence</span><span class="kv-val" style="color:${patterns.bot_like_cadence?'var(--critical)':'var(--low)'}">${patterns.bot_like_cadence?'⚠ YES':'No'}</span>`:''}
+      </div>
+    </div>`;
+  }
+
+  // Bio links
+  const bioLinks = enr.bio_links || [];
+  if (bioLinks.length) {
+    html += `<div class="card"><div class="card-title">Links Found in Bio / Profile</div>
+      ${bioLinks.map(l=>`
+        <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">
+          ${l.is_social?`<span class="found-tag" style="font-size:10px">${escHtml(l.platform||l.domain)}</span>`:`<span class="notfound-tag" style="font-size:10px">${escHtml(l.domain)}</span>`}
+          <a href="${escHtml(l.url)}" target="_blank" style="color:var(--accent2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(l.url)}</a>
+        </div>`).join('')}
+    </div>`;
+  }
+
+  // Top posts
+  const topPosts = enr.top_posts || [];
+  if (topPosts.length) {
+    html += `<div class="card"><div class="card-title">Top Posts by Engagement</div>
+      ${topPosts.map(p=>`
+        <div style="padding:10px 0;border-bottom:1px solid var(--border)">
+          <div style="font-size:13px;margin-bottom:6px;line-height:1.5">${escHtml((p.text||'').slice(0,200))}</div>
+          <div style="display:flex;gap:14px;font-size:11px;color:var(--text2)">
+            ${p.likes!=null?`<span>❤ ${fmt(p.likes)}</span>`:''}
+            ${p.reposts!=null?`<span>🔁 ${fmt(p.reposts)}</span>`:''}
+            ${p.views!=null?`<span>👁 ${fmt(p.views)}</span>`:''}
+            ${p.created_at?`<span>${new Date(p.created_at).toLocaleDateString()}</span>`:''}
+            ${p.url?`<a href="${escHtml(p.url)}" target="_blank" style="color:var(--accent2);margin-left:auto">View ↗</a>`:''}
+          </div>
+        </div>`).join('')}
+    </div>`;
+  }
+
+  return html;
+}
+
+function renderTimeline(c) {
+  const enr = c.account_enrichment || {};
+  const posts = enr.recent_posts || [];
+  if (!posts.length) return `<div style="color:var(--text2);padding:20px">
+    No timeline scraped yet. Timeline is fetched from Nitter/fxtwitter.
+    ${c.status === 'running' ? 'Investigation still in progress…' : ''}
+  </div>`;
+
+  return `
+    <div style="margin-bottom:12px;font-size:12px;color:var(--text2)">${posts.length} recent posts scraped</div>
+    ${posts.map(p=>`
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;margin-bottom:8px">
+        <div style="font-size:13px;line-height:1.6;margin-bottom:8px">${escHtml(p.text||'')}</div>
+        <div style="display:flex;gap:14px;font-size:11px;color:var(--text2);align-items:center;flex-wrap:wrap">
+          ${p.likes!=null?`<span>❤ ${fmt(p.likes)}</span>`:''}
+          ${p.reposts!=null?`<span>🔁 ${fmt(p.reposts)}</span>`:''}
+          ${p.replies!=null?`<span>💬 ${fmt(p.replies)}</span>`:''}
+          ${p.views!=null?`<span>👁 ${fmt(p.views)}</span>`:''}
+          ${p.created_at?`<span style="margin-left:auto">${new Date(p.created_at).toLocaleString()}</span>`:''}
+          ${p.url?`<a href="${escHtml(p.url)}" target="_blank" style="color:var(--accent2)">↗</a>`:''}
+        </div>
+      </div>`).join('')}`;
+}
+
+function renderMedia(c) {
+  const files = c.media_files || [];
+  if (!files.length) return '<div style="color:var(--text2);padding:20px">No media files downloaded.</div>';
+  return `<div class="media-grid">${files.map(m => {
+    const isImg = m.media_type === 'image';
+    const imgSrc = isImg ? `/api/cases/${c.id}/media/${m.filename}` : null;
+    const icon = m.media_type==='video'?'🎬':m.media_type==='audio'?'🎵':'📁';
+    return `
+      <div class="media-card">
+        ${isImg ? `<img class="media-thumb" src="${imgSrc}" loading="lazy" onerror="this.style.display='none'">` : `<div class="media-thumb">${icon}</div>`}
+        <div class="media-info">
+          <div class="media-filename">${escHtml(m.filename)}</div>
+          <div class="media-meta">
+            ${m.media_type} · ${fmtSize(m.file_size)}
+            ${m.metadata?.Make ? `<br>📷 ${escHtml(m.metadata.Make)} ${escHtml(m.metadata.Model||'')}`:''}
+            ${m.metadata?.DateTime||m.metadata?.DateTimeOriginal ? `<br>📅 ${escHtml(m.metadata.DateTimeOriginal||m.metadata.DateTime)}`:''}
+          </div>
+          <div class="media-hash" style="margin-top:6px">SHA256: ${m.hash_sha256.slice(0,20)}…</div>
+          ${m.gps_lat ? `
+            <div class="media-gps">
+              📍 ${m.gps_lat.toFixed(5)}, ${m.gps_lon.toFixed(5)}<br>
+              ${m.gps_address?escHtml(m.gps_address.slice(0,60))+'…':''}
+              <br><a href="https://maps.google.com/?q=${m.gps_lat},${m.gps_lon}" target="_blank">Open in Maps</a>
+            </div>` : ''}
+          ${m.ocr_text ? `<div style="margin-top:6px;font-size:11px;color:var(--text2)">OCR text:</div><div class="ocr-box">${escHtml(m.ocr_text.slice(0,500))}</div>`:''}
+          ${Object.keys(m.reverse_search_urls||{}).length ? `
+            <div class="media-links">
+              ${Object.entries(m.reverse_search_urls).map(([k,v])=>`<a class="media-link" href="${escHtml(v)}" target="_blank">${k.replace('_',' ')}</a>`).join('')}
+            </div>` : ''}
+        </div>
+      </div>`;
+  }).join('')}</div>`;
+}
+
+function renderIdentity(c) {
+  const pivots = c.identity_pivots || [];
+  const enr = c.account_enrichment || {};
+  let html = '';
+
+  // Bio emails found
+  if (enr.bio_emails?.length) {
+    html += `<div class="card" style="border-color:var(--critical)">
+      <div class="card-title" style="color:var(--critical)">⚠ Email Address Found in Bio</div>
+      ${enr.bio_emails.map(e=>`
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 0">
+          <span style="font-family:monospace;font-size:14px;font-weight:600">${escHtml(e)}</span>
+          <a href="https://haveibeenpwned.com/account/${encodeURIComponent(e)}" target="_blank" class="media-link">HIBP</a>
+          <a href="https://emailrep.io/${encodeURIComponent(e)}" target="_blank" class="media-link">EmailRep</a>
+          <a href="https://www.google.com/search?q=${encodeURIComponent('"'+e+'"')}" target="_blank" class="media-link">Google</a>
+        </div>`).join('')}
+    </div>`;
+  }
+
+  // Sherlock / cross-platform username
+  if (c.username_search?.length) {
+    html += `<div class="card">
+      <div class="card-title">Username Found on Other Platforms (${c.username_search.length})</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">
+        ${c.username_search.map(u=>`
+          <a href="${escHtml(u.url||'#')}" target="_blank" style="text-decoration:none">
+            <span class="found-tag" style="cursor:pointer;font-size:12px">${escHtml(u.platform||'?')}</span>
+          </a>`).join('')}
+      </div>
+    </div>`;
+  }
+
+  // Bio links
+  const socialLinks = (enr.bio_links||[]).filter(l=>l.is_social);
+  if (socialLinks.length) {
+    html += `<div class="card">
+      <div class="card-title">Confirmed Cross-Platform Links (from bio)</div>
+      ${socialLinks.map(l=>`
+        <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">
+          <span class="found-tag" style="font-size:11px">${escHtml(l.platform)}</span>
+          <a href="${escHtml(l.url)}" target="_blank" style="color:var(--accent2)">${escHtml(l.url)}</a>
+        </div>`).join('')}
+    </div>`;
+  }
+
+  if (!pivots.length && !enr.bio_emails?.length && !c.username_search?.length) {
+    return html + '<div style="color:var(--text2);padding:20px">No identity data extracted. Try with an account that has public email or bio links.</div>';
+  }
+  return pivots.map(p => `
+    <div class="id-card">
+      <div class="id-header">
+        <span class="id-type">${p.identifier_type.toUpperCase()}</span>
+        <span class="id-value">${escHtml(p.identifier)}</span>
+      </div>
+      ${p.gravatar_name||p.gravatar_avatar ? `
+        <div style="display:flex;gap:10px;align-items:center;margin:8px 0;padding:8px;background:rgba(63,185,80,.05);border-radius:4px">
+          ${p.gravatar_avatar?`<img src="${p.gravatar_avatar}" style="width:40px;height:40px;border-radius:50%">` : ''}
+          <div>
+            <div style="font-size:12px;color:var(--low);font-weight:600">✓ Gravatar found</div>
+            ${p.gravatar_name?`<div style="font-size:13px">${escHtml(p.gravatar_name)}</div>`:''}
+          </div>
+        </div>` : ''}
+      ${p.hibp_breaches?.length ? `
+        <div style="margin:8px 0">
+          <div style="font-size:12px;font-weight:600;color:var(--critical);margin-bottom:6px">⚠ Found in ${p.hibp_breaches.length} breach(es)</div>
+          ${p.hibp_breaches.map(b=>`
+            <div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:12px">
+              <span style="font-weight:600">${escHtml(b.name||'?')}</span>
+              <span style="color:var(--text2)"> · ${escHtml(b.breach_date||'?')}</span>
+              <div style="color:var(--text2)">${(b.data_classes||[]).slice(0,5).join(', ')}</div>
+            </div>`).join('')}
+        </div>` : ''}
+      ${p.platforms_found?.length ? `
+        <div style="margin:8px 0">
+          <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px">Platforms found:</div>
+          ${p.platforms_found.map(pf=>`
+            <div style="font-size:12px;margin:3px 0">
+              ${pf.platform?`<span class="found-tag">${escHtml(pf.platform)}</span>`:''}
+              ${pf.url?`<a href="${escHtml(pf.url)}" target="_blank" style="color:var(--accent2);font-size:11px">${escHtml(pf.url.slice(0,60))}</a>`:''}
+            </div>`).join('')}
+        </div>` : ''}
+      ${Object.keys(p.manual_search_links||{}).length ? `
+        <div style="margin-top:8px">
+          <div style="font-size:11px;color:var(--text2);margin-bottom:4px">Manual search links:</div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px">
+            ${Object.entries(p.manual_search_links).map(([k,v])=>`<a href="${escHtml(v)}" target="_blank" class="media-link">${escHtml(k)}</a>`).join('')}
+          </div>
+        </div>` : ''}
+    </div>`).join('');
+}
+
+function renderNetwork(c) {
+  const xposts = c.cross_posts || [];
+  const unames = c.username_search || [];
+  let html = '';
+
+  if (xposts.length) {
+    html += `<div class="card"><div class="card-title">Cross-Posts / Reposts Found</div>
+      <table><thead><tr><th>Platform</th><th>URL</th><th>Match Type</th><th>Time</th></tr></thead><tbody>
+      ${xposts.map(x=>`<tr>
+        <td>${escHtml(x.platform||'?')}</td>
+        <td><a href="${escHtml(x.url||'#')}" target="_blank">${escHtml((x.url||'').slice(0,60))}…</a></td>
+        <td><span style="font-family:monospace;font-size:11px">${escHtml(x.match_type||'?')}</span></td>
+        <td style="font-size:11px">${x.posted_at?new Date(x.posted_at).toLocaleDateString():'?'}</td>
+      </tr>`).join('')}</tbody></table></div>`;
+  }
+
+  if (unames.length) {
+    html += `<div class="card"><div class="card-title">Username Found On (${unames.length} platforms)</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">
+      ${unames.map(u=>`<a href="${escHtml(u.url||'#')}" target="_blank" style="text-decoration:none">
+        <span class="found-tag" style="cursor:pointer">${escHtml(u.platform||'?')}</span>
+      </a>`).join('')}
+      </div></div>`;
+  }
+
+  if (!xposts.length && !unames.length) {
+    html = '<div style="color:var(--text2);padding:20px">No cross-platform results found.</div>';
+  }
+
+  return html;
+}
+
+function renderDarkweb(c) {
+  const hits = c.dark_web || [];
+  const username = c.account?.username || c.post?.author_username || '';
+  if (!hits.length) {
+    const manualLinks = c.manual_searches || [];
+    return `<div style="padding:20px">
+      <div style="color:var(--text2);margin-bottom:16px">
+        No dark web hits found for <strong>@${escHtml(username)}</strong>.
+        Sources searched: Ahmia (Tor index), IntelligenceX, paste sites.
+        This is normal for most accounts — absence of results is not confirmation of clean record.
+      </div>
+      ${manualLinks.length ? `
+        <div class="card-title" style="margin-bottom:8px">Manual Dark Web Search Links</div>
+        ${manualLinks.map(s=>`<div style="margin-bottom:8px">
+          <a href="${escHtml(s.url)}" target="_blank" style="color:var(--accent2);font-size:13px">${escHtml(s.label||s.url)}</a>
+        </div>`).join('')}` : ''}
+      <div class="card" style="margin-top:16px">
+        <div class="card-title">Manual Paste / Leak Searches</div>
+        ${username ? `
+          <div style="margin-bottom:8px"><a href="https://www.google.com/search?q=site:pastebin.com+${encodeURIComponent(username)}" target="_blank" style="color:var(--accent2);font-size:13px">Pastebin search for @${escHtml(username)}</a></div>
+          <div style="margin-bottom:8px"><a href="https://dehashed.com/search?query=${encodeURIComponent(username)}" target="_blank" style="color:var(--accent2);font-size:13px">DeHashed (requires account)</a></div>
+          <div style="margin-bottom:8px"><a href="https://intelx.io/?s=${encodeURIComponent(username)}" target="_blank" style="color:var(--accent2);font-size:13px">IntelligenceX</a></div>
+          <div style="margin-bottom:8px"><a href="https://ahmia.fi/search/?q=${encodeURIComponent(username)}" target="_blank" style="color:var(--accent2);font-size:13px">Ahmia Tor search</a></div>` : ''}
+      </div>
+    </div>`;
+  }
+  return `<div class="card">
+    <div class="card-title">Dark Web / Breach Results (${hits.length})</div>
+    <table><thead><tr><th>Source</th><th>Type</th><th>Title</th><th>Date</th></tr></thead><tbody>
+    ${hits.map(h=>`<tr>
+      <td style="font-family:monospace;font-size:11px">${escHtml(h.source||'?')}</td>
+      <td><span style="font-size:11px;padding:2px 6px;background:rgba(248,81,73,.1);color:var(--critical);border-radius:3px">${escHtml(h.type||h.result_type||'?')}</span></td>
+      <td>${h.url?`<a href="${escHtml(h.url)}" target="_blank">${escHtml((h.title||h.url).slice(0,60))}</a>`:escHtml(h.title||'?')}</td>
+      <td style="font-size:11px">${h.indexed_at?new Date(h.indexed_at).toLocaleDateString():'?'}</td>
+    </tr>`).join('')}</tbody></table></div>`;
+}
+
+function renderFlags(c) {
+  const flags = c.red_flags || [];
+  if (!flags.length) return '<div style="color:var(--text2);padding:20px">No red flags raised.</div>';
+  return `<div class="card"><div class="card-title">Red Flags (Risk: ${c.risk_label||'?'} · Score: ${c.risk_score||0})</div>
+    ${flags.map(f=>`
+      <div class="flag">
+        <span class="flag-sev badge-${f.severity}" style="background:var(--bg3);padding:3px 8px;border-radius:3px;font-size:11px;font-weight:700;color:var(--${f.severity==='high'?'high':f.severity==='medium'?'medium':f.severity==='critical'?'critical':'low'})">${(f.severity||'?').toUpperCase()}</span>
+        <div>
+          <div class="flag-desc">${escHtml(f.description||'')}</div>
+          ${f.evidence?`<div class="flag-evidence">${escHtml(f.evidence)}</div>`:''}
+        </div>
+      </div>`).join('')}</div>`;
+}
+
+function renderAutoActions(c) {
+  const actions = c.auto_actions || {};
+  if (!Object.keys(actions).length) {
+    return `<div style="color:var(--text2);padding:20px">Auto-investigations haven't run yet or found no results.</div>`;
+  }
+  let html = `<div style="font-size:12px;color:var(--text2);margin-bottom:16px">
+    ${Object.keys(actions).length} auto-actions performed during investigation
+  </div>`;
+
+  for (const [key, result] of Object.entries(actions)) {
+    const label = key.replace(/_/g,' ').replace(/\b\w/g, l => l.toUpperCase());
+    const ok = !result.error;
+    html += `<div class="card" style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-size:13px;font-weight:600">${escHtml(label)}</div>
+        <span style="font-size:10px;padding:2px 7px;border-radius:3px;background:${ok?'rgba(63,185,80,.15)':'rgba(248,81,73,.15)'};color:${ok?'var(--low)':'var(--critical)'}">${ok?'OK':'ERROR'}</span>
+      </div>`;
+
+    if (result.error) {
+      html += `<div style="font-size:12px;color:var(--text2)">${escHtml(result.error)}</div>`;
+    }
+
+    // Reverse search
+    if (key.startsWith('reverse_search_')) {
+      const ys = result.yandex_results;
+      if (ys?.matches?.length) {
+        html += `<div style="font-size:12px;color:var(--critical);font-weight:600">Found on ${ys.matches.length} site(s):</div>`;
+        ys.matches.slice(0,5).forEach(m => {
+          html += `<div style="font-size:12px;margin:3px 0"><a href="${escHtml(m.url)}" target="_blank" style="color:var(--accent2)">${escHtml(m.title||m.url)}</a></div>`;
+        });
+      } else {
+        html += `<div style="font-size:12px;color:var(--text2)">No duplicate appearances found.</div>`;
+      }
+      html += '<div style="display:flex;gap:6px;margin-top:6px">';
+      for (const [eng,url] of Object.entries(result.search_links||{})) {
+        html += `<a href="${escHtml(url)}" target="_blank" class="media-link">${eng.replace('_',' ')}</a>`;
+      }
+      html += '</div>';
+    }
+
+    // Following list
+    if (key === 'twitter_following') {
+      if (result.found && result.accounts?.length) {
+        result.accounts.forEach(a => {
+          html += `<div style="font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)">
+            <a href="${escHtml(a.url||'#')}" target="_blank" style="color:var(--accent2);font-weight:600">@${escHtml(a.username||'?')}</a>
+            ${a.display_name?` · ${escHtml(a.display_name)}`:''}
+            ${a.bio?`<div style="color:var(--text2);font-size:11px">${escHtml(a.bio.slice(0,100))}</div>`:''}
+          </div>`;
+        });
+      } else {
+        html += `<div style="font-size:12px;color:var(--text2)">Could not retrieve (Twitter blocks automated access).</div>`;
+        if (result.manual_url) {
+          html += `<a href="${escHtml(result.manual_url)}" target="_blank" style="color:var(--accent2);font-size:12px">View manually ↗</a>`;
+        }
+      }
+    }
+
+    // Platform profiles
+    if (key.startsWith('profile_') && result.found) {
+      if (result.bio || result.description) html += `<div style="font-size:12px;color:var(--text2);margin-bottom:6px">${escHtml((result.bio||result.description||'').slice(0,300))}</div>`;
+      if (result.links?.length) {
+        result.links.slice(0,8).forEach(l => {
+          html += `<div style="font-size:12px;margin:3px 0"><a href="${escHtml(l.url)}" target="_blank" style="color:var(--accent2)">${escHtml(l.title||l.url)}</a></div>`;
+        });
+      }
+    }
+
+    html += '</div>';
+  }
+  return html;
+}
+
+// ── Network Graph ────────────────────────────────────────────────────────────
+
+const NODE_COLORS = {
+  url:       '#1f6feb',
+  post:      '#2ea043',
+  account:   '#f0883e',
+  platform:  '#58a6ff',
+  media:     '#a371f7',
+  geo:       '#3fb950',
+  identity:  '#f85149',
+  breach:    '#ff7b72',
+  email:     '#d29922',
+  darkweb:   '#8b1a1a',
+  linktree:  '#39d353',
+  blogger:   '#ff6b35',
+  following: '#79c0ff',
+  default:   '#8b949e',
+};
+
+const NODE_ICONS = {
+  url: '🔗', post: '📝', account: '👤', platform: '🌐',
+  media: '🎬', geo: '📍', identity: '🪪', breach: '⚠',
+  email: '✉', darkweb: '🕸', following: '👥', default: '●',
+};
+
+let graphSimulation = null;
+
+function buildGraphData(c) {
+  const nodes = [];
+  const edges = [];
+  const nodeMap = {};
+
+  function addNode(id, type, label, data = {}, url = null) {
+    if (nodeMap[id]) return nodeMap[id];
+    const node = { id, type, label, data, url, x: 0, y: 0, vx: 0, vy: 0, r: type === 'account' ? 28 : type === 'url' ? 22 : 18 };
+    nodes.push(node);
+    nodeMap[id] = node;
+    return node;
+  }
+
+  function addEdge(source, target, label = '') {
+    if (nodeMap[source] && nodeMap[target]) {
+      edges.push({ source, target, label });
+    }
+  }
+
+  // Central URL node
+  addNode('url', 'url', c.url.replace(/https?:\/\//, '').slice(0, 35) + '…', { url: c.url }, c.url);
+
+  // Post node
+  if (c.post) {
+    const postLabel = (c.post.text || '').slice(0, 40) + '…';
+    addNode('post', 'post', postLabel, c.post, c.post.url);
+    addEdge('url', 'post', 'contains');
+
+    // Account node
+    if (c.account) {
+      const acct = c.account;
+      addNode('account', 'account', `@${acct.username}`, acct, `https://twitter.com/${acct.username}`);
+      addEdge('post', 'account', 'posted by');
+
+      // Platform nodes (Sherlock)
+      for (const hit of (c.username_search || [])) {
+        const pid = `platform_${hit.platform}`;
+        addNode(pid, 'platform', hit.platform, hit, hit.url);
+        addEdge('account', pid, 'same username');
+      }
+
+      // Bio links
+      for (const [i, link] of ((c.account_enrichment?.bio_links || []).filter(l => l.is_social)).entries()) {
+        const bid = `biolink_${i}`;
+        addNode(bid, 'platform', link.platform || link.domain, link, link.url);
+        addEdge('account', bid, 'bio link');
+      }
+    }
+
+    // Media nodes
+    for (const [i, mf] of (c.media_files || []).entries()) {
+      const mid = `media_${i}`;
+      addNode(mid, 'media', mf.filename, mf);
+      addEdge('post', mid, 'contains');
+      if (mf.gps_lat) {
+        const gid = `geo_${i}`;
+        addNode(gid, 'geo', `📍 ${(mf.gps_address || `${mf.gps_lat.toFixed(3)},${mf.gps_lon.toFixed(3)}`).slice(0, 30)}`, mf, `https://maps.google.com/?q=${mf.gps_lat},${mf.gps_lon}`);
+        addEdge(mid, gid, 'GPS');
+      }
+    }
+  }
+
+  // Auto-action derived nodes
+  for (const [key, val] of Object.entries(c.auto_actions || {})) {
+    if (!val?.found) continue;
+    const platform = val.platform || '';
+
+    // Blogger display name → identity node
+    if (key === 'profile_blogger' && val.display_name) {
+      const iid = 'identity_blogger';
+      addNode(iid, 'identity', val.display_name, val, val.url || 'https://insiderwb.blogspot.com');
+      const platformId = 'platform_Blogger';
+      if (nodeMap[platformId]) addEdge(platformId, iid, 'display name');
+      else if (nodeMap['account']) addEdge('account', iid, 'alt identity');
+
+      // Add blog posts as child nodes
+      for (const [i, post] of (val.posts || []).slice(0, 3).entries()) {
+        const bpid = `blogpost_${i}`;
+        addNode(bpid, 'post', post.title?.slice(0, 35) || 'Blog post', post, post.url);
+        addEdge(iid, bpid, 'authored');
+      }
+    }
+
+    // Linktree links → nodes
+    if (key === 'profile_linktree') {
+      for (const [i, link] of (val.links || []).slice(0, 5).entries()) {
+        const lid = `lt_link_${i}`;
+        addNode(lid, 'platform', link.title || link.domain, link, link.url);
+        addEdge('platform_Linktree', lid, 'links to');
+      }
+    }
+  }
+
+  // Dark web hits
+  for (const [i, hit] of (c.dark_web || []).slice(0, 5).entries()) {
+    const did = `darkweb_${i}`;
+    addNode(did, 'darkweb', hit.title?.slice(0, 30) || hit.source, hit, hit.url);
+    addEdge('account', did, 'found in');
+  }
+
+  // Identity pivots → email/breach nodes
+  for (const piv of (c.identity_pivots || [])) {
+    const eid = `id_${piv.identifier}`;
+    const type = piv.identifier_type === 'email' ? 'email' : 'identity';
+    addNode(eid, type, piv.identifier, piv);
+    addEdge('account', eid, piv.identifier_type);
+    for (const [i, breach] of (piv.hibp_breaches || []).slice(0, 3).entries()) {
+      const bid = `breach_${i}_${eid}`;
+      addNode(bid, 'breach', breach.name || 'Breach', breach);
+      addEdge(eid, bid, 'found in');
+    }
+  }
+
+  // Twitter following nodes
+  const following = (c.auto_actions || {}).twitter_following;
+  if (following?.found && following.accounts?.length) {
+    for (const [i, acct] of following.accounts.slice(0, 8).entries()) {
+      const fid = `following_${i}`;
+      addNode(fid, 'following', `@${acct.username || '?'}`, acct, acct.url);
+      addEdge('account', fid, 'follows');
+    }
+  }
+
+  // Initialize positions in a circle
+  const cx = 0, cy = 0, r = 180;
+  nodes.forEach((n, i) => {
+    if (n.id === 'url') { n.x = cx; n.y = cy; return; }
+    if (n.id === 'account') { n.x = cx + 150; n.y = cy; return; }
+    const angle = (i / nodes.length) * 2 * Math.PI;
+    n.x = cx + r * Math.cos(angle) + (Math.random() - 0.5) * 40;
+    n.y = cy + r * Math.sin(angle) + (Math.random() - 0.5) * 40;
+  });
+
+  return { nodes, edges, nodeMap };
+}
+
+function renderNetworkGraph(c, container) {
+  container.innerHTML = `
+    <div id="graph-container">
+      <canvas id="graph-canvas"></canvas>
+      <div id="graph-controls">
+        <button class="graph-btn" onclick="graphZoomIn()">+</button>
+        <button class="graph-btn" onclick="graphZoomOut()">−</button>
+        <button class="graph-btn" onclick="graphReset()">⊙ Reset</button>
+        <button class="graph-btn" onclick="graphToggleLabels()">Labels</button>
+      </div>
+      <div id="graph-detail"></div>
+      <div id="graph-legend">
+        ${Object.entries({URL:'url',Post:'post',Account:'account',Platform:'platform',Media:'media',Identity:'identity',DarkWeb:'darkweb',Breach:'breach','Following':'following'}).map(([label,type])=>`
+          <div class="legend-item"><div class="legend-dot" style="background:${NODE_COLORS[type]}"></div>${label}</div>
+        `).join('')}
+      </div>
+    </div>`;
+
+  const gc = document.getElementById('graph-container');
+  const canvas = document.getElementById('graph-canvas');
+  canvas.width = gc.clientWidth;
+  canvas.height = gc.clientHeight;
+  const ctx = canvas.getContext('2d');
+
+  const graph = buildGraphData(c);
+  const { nodes, edges, nodeMap } = graph;
+
+  let transform = { x: canvas.width / 2, y: canvas.height / 2, scale: 1 };
+  let dragging = null, dragOffX = 0, dragOffY = 0;
+  let panning = false, panStartX = 0, panStartY = 0, panTX = 0, panTY = 0;
+  let showLabels = true;
+  let selectedNode = null;
+  let animFrame = null;
+
+  // Force simulation
+  function tick() {
+    const k = 0.1, rep = 4000, damping = 0.85;
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i], b = nodes[j];
+        const dx = b.x - a.x || 0.1, dy = b.y - a.y || 0.1;
+        const dist2 = dx * dx + dy * dy;
+        const dist = Math.sqrt(dist2) || 1;
+        const f = rep / dist2;
+        const fx = f * dx / dist, fy = f * dy / dist;
+        a.vx -= fx; a.vy -= fy;
+        b.vx += fx; b.vy += fy;
+      }
+    }
+    for (const e of edges) {
+      const a = nodeMap[e.source], b = nodeMap[e.target];
+      if (!a || !b) continue;
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      const target = 140;
+      const f = (dist - target) * k;
+      const fx = f * dx / dist, fy = f * dy / dist;
+      a.vx += fx; a.vy += fy;
+      b.vx -= fx; b.vy -= fy;
+    }
+    for (const n of nodes) {
+      if (n === dragging) continue;
+      n.vx -= n.x * 0.004;
+      n.vy -= n.y * 0.004;
+      n.vx *= damping; n.vy *= damping;
+      n.x += n.vx; n.y += n.vy;
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.save();
+    ctx.translate(transform.x, transform.y);
+    ctx.scale(transform.scale, transform.scale);
+
+    // Edges
+    for (const e of edges) {
+      const a = nodeMap[e.source], b = nodeMap[e.target];
+      if (!a || !b) continue;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.strokeStyle = a === selectedNode || b === selectedNode ? '#58a6ff' : '#30363d';
+      ctx.lineWidth = a === selectedNode || b === selectedNode ? 1.5 : 0.8;
+      ctx.stroke();
+      if (showLabels && e.label && transform.scale > 0.7) {
+        const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+        ctx.fillStyle = '#8b949e';
+        ctx.font = '8px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(e.label, mx, my - 3);
+      }
+    }
+
+    // Nodes
+    for (const n of nodes) {
+      const color = NODE_COLORS[n.type] || NODE_COLORS.default;
+      const isSelected = n === selectedNode;
+      const r = n.r;
+
+      // Glow for selected
+      if (isSelected) {
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, r + 6, 0, Math.PI * 2);
+        ctx.fillStyle = color + '33';
+        ctx.fill();
+      }
+
+      // Circle
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = isSelected ? color : color + 'bb';
+      ctx.fill();
+      ctx.strokeStyle = isSelected ? '#fff' : color;
+      ctx.lineWidth = isSelected ? 2 : 1;
+      ctx.stroke();
+
+      // Icon
+      ctx.font = `${Math.max(10, r * 0.65)}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#fff';
+      ctx.fillText(NODE_ICONS[n.type] || NODE_ICONS.default, n.x, n.y);
+
+      // Label
+      if (showLabels) {
+        ctx.font = `${transform.scale > 0.8 ? 10 : 8}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillStyle = isSelected ? '#e6edf3' : '#8b949e';
+        const label = n.label.length > 20 ? n.label.slice(0, 18) + '…' : n.label;
+        ctx.fillText(label, n.x, n.y + r + 3);
+      }
+    }
+    ctx.restore();
+    tick();
+    animFrame = requestAnimationFrame(draw);
+  }
+
+  function worldToScreen(wx, wy) {
+    return { x: wx * transform.scale + transform.x, y: wy * transform.scale + transform.y };
+  }
+  function screenToWorld(sx, sy) {
+    return { x: (sx - transform.x) / transform.scale, y: (sy - transform.y) / transform.scale };
+  }
+  function nodeAt(wx, wy) {
+    for (const n of nodes) {
+      const dx = n.x - wx, dy = n.y - wy;
+      if (Math.sqrt(dx * dx + dy * dy) < n.r + 4) return n;
+    }
+    return null;
+  }
+
+  function showNodeDetail(node) {
+    selectedNode = node;
+    const detail = document.getElementById('graph-detail');
+    detail.classList.add('visible');
+    const color = NODE_COLORS[node.type] || NODE_COLORS.default;
+    let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <span style="font-size:13px;font-weight:600;color:${color}">${NODE_ICONS[node.type]} ${escHtml(node.label)}</span>
+      <button onclick="closeNodeDetail()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:16px">✕</button>
+    </div>`;
+    html += `<div style="font-size:11px;color:var(--text2);margin-bottom:8px">Type: ${node.type}</div>`;
+
+    const d = node.data || {};
+    if (node.type === 'account') {
+      html += kv('Username', `@${d.username||'?'}`);
+      html += kv('Followers', fmt(d.metrics?.followers));
+      html += kv('Created', d.created_at ? new Date(d.created_at).toLocaleDateString() : '?');
+      html += kv('Location', d.location || '?');
+    } else if (node.type === 'post') {
+      html += `<div style="font-size:12px;margin-bottom:6px;line-height:1.5">${escHtml((d.text||'').slice(0,200))}</div>`;
+      html += kv('Likes', fmt(d.engagement?.likes));
+      html += kv('Views', fmt(d.engagement?.views));
+    } else if (node.type === 'media') {
+      html += kv('File', d.filename);
+      html += kv('Type', d.media_type);
+      html += kv('Size', fmtSize(d.file_size));
+      html += kv('SHA256', (d.hash_sha256||'').slice(0,20)+'…');
+      if (d.gps_lat) html += kv('GPS', `${d.gps_lat?.toFixed(4)}, ${d.gps_lon?.toFixed(4)}`);
+    } else if (node.type === 'identity') {
+      html += kv('Display name', d.display_name);
+      html += kv('Platform', d.platform);
+      if (d.posts?.length) {
+        html += `<div style="margin-top:6px;font-size:11px;font-weight:600;color:var(--text2)">Posts:</div>`;
+        d.posts.forEach(p => { html += `<div style="font-size:11px;margin-top:2px"><a href="${escHtml(p.url||'#')}" target="_blank" style="color:var(--accent2)">${escHtml(p.title?.slice(0,50))}</a></div>`; });
+      }
+    } else if (node.type === 'breach' || node.type === 'darkweb') {
+      html += kv('Source', d.source);
+      html += kv('Type', d.result_type || d.type);
+      if (d.snippet) html += `<div style="font-size:11px;color:var(--text2);margin-top:4px">${escHtml(d.snippet.slice(0,200))}</div>`;
+    } else if (node.type === 'platform') {
+      html += kv('Platform', d.platform || node.label);
+      html += kv('URL', '');
+    } else if (node.type === 'following') {
+      html += kv('Handle', `@${d.username||'?'}`);
+      html += kv('Name', d.display_name || '?');
+      if (d.bio) html += `<div style="font-size:11px;color:var(--text2);margin-top:4px">${escHtml(d.bio.slice(0,100))}</div>`;
+    } else if (node.type === 'geo') {
+      html += kv('Latitude', d.gps_lat?.toFixed(5));
+      html += kv('Longitude', d.gps_lon?.toFixed(5));
+      html += kv('Address', d.gps_address);
+    }
+
+    // Action buttons
+    const openUrl = node.url || d.url || (d.platform === 'Blogger' ? 'https://insiderwb.blogspot.com' : null);
+    if (openUrl) {
+      html += `<a href="${escHtml(openUrl)}" target="_blank" class="g-link" style="margin-top:10px;display:inline-flex">Open ↗</a>`;
+    }
+    if (node.type === 'platform' || node.type === 'account') {
+      const username = d.username || currentCaseId;
+      html += `<button onclick="investigateNode('${escHtml(node.url||openUrl||'')}', '${escHtml(node.label)}')"
+        style="margin-top:6px;width:100%;background:var(--accent2);color:#fff;border:none;border-radius:4px;padding:6px;font-size:12px;cursor:pointer">
+        🔍 Investigate this profile
+      </button>`;
+    }
+
+    detail.innerHTML = html;
+  }
+
+  function kv(key, val) {
+    if (!val) return '';
+    return `<div style="display:flex;gap:6px;margin-bottom:3px;font-size:11px">
+      <span style="color:var(--text2);min-width:70px">${key}</span>
+      <span style="color:var(--text)">${escHtml(String(val))}</span>
+    </div>`;
+  }
+
+  window.closeNodeDetail = () => {
+    selectedNode = null;
+    document.getElementById('graph-detail').classList.remove('visible');
+  };
+
+  window.investigateNode = (url, label) => {
+    if (!url) return;
+    document.getElementById('url-input').value = url;
+    document.getElementById('submit-btn').click();
+  };
+
+  window.graphZoomIn = () => { transform.scale = Math.min(3, transform.scale * 1.2); };
+  window.graphZoomOut = () => { transform.scale = Math.max(0.2, transform.scale / 1.2); };
+  window.graphReset = () => { transform = { x: canvas.width / 2, y: canvas.height / 2, scale: 1 }; };
+  window.graphToggleLabels = () => { showLabels = !showLabels; };
+
+  // Mouse events
+  canvas.addEventListener('mousedown', e => {
+    const w = screenToWorld(e.offsetX, e.offsetY);
+    const hit = nodeAt(w.x, w.y);
+    if (hit) {
+      dragging = hit;
+      dragOffX = hit.x - w.x;
+      dragOffY = hit.y - w.y;
+    } else {
+      panning = true;
+      panStartX = e.offsetX; panStartY = e.offsetY;
+      panTX = transform.x; panTY = transform.y;
+    }
+  });
+
+  canvas.addEventListener('mousemove', e => {
+    if (dragging) {
+      const w = screenToWorld(e.offsetX, e.offsetY);
+      dragging.x = w.x + dragOffX;
+      dragging.y = w.y + dragOffY;
+      dragging.vx = 0; dragging.vy = 0;
+    } else if (panning) {
+      transform.x = panTX + (e.offsetX - panStartX);
+      transform.y = panTY + (e.offsetY - panStartY);
+    }
+    const w = screenToWorld(e.offsetX, e.offsetY);
+    canvas.style.cursor = nodeAt(w.x, w.y) ? 'pointer' : panning ? 'grabbing' : 'grab';
+  });
+
+  canvas.addEventListener('mouseup', e => {
+    if (dragging) {
+      const w = screenToWorld(e.offsetX, e.offsetY);
+      const moved = Math.abs(dragging.x - (w.x + dragOffX)) + Math.abs(dragging.y - (w.y + dragOffY));
+      if (moved < 3) showNodeDetail(dragging);
+    }
+    dragging = null;
+    panning = false;
+  });
+
+  canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    const factor = e.deltaY > 0 ? 0.9 : 1.1;
+    const wx = (e.offsetX - transform.x) / transform.scale;
+    const wy = (e.offsetY - transform.y) / transform.scale;
+    transform.scale = Math.max(0.2, Math.min(3, transform.scale * factor));
+    transform.x = e.offsetX - wx * transform.scale;
+    transform.y = e.offsetY - wy * transform.scale;
+  }, { passive: false });
+
+  // Handle resize
+  const resizeObs = new ResizeObserver(() => {
+    canvas.width = gc.clientWidth;
+    canvas.height = gc.clientHeight;
+  });
+  resizeObs.observe(gc);
+
+  if (animFrame) cancelAnimationFrame(animFrame);
+  graphSimulation = { cancel: () => { cancelAnimationFrame(animFrame); resizeObs.disconnect(); } };
+  draw();
+}
+
+// ── Utils ────────────────────────────────────────────────────────────────────
+function escHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function fmt(n) {
+  if (n==null) return '–';
+  if (n >= 1e9) return (n/1e9).toFixed(1)+'B';
+  if (n >= 1e6) return (n/1e6).toFixed(1)+'M';
+  if (n >= 1e3) return (n/1e3).toFixed(1)+'K';
+  return String(n);
+}
+
+function fmtSize(bytes) {
+  if (!bytes) return '0B';
+  if (bytes > 1e6) return (bytes/1e6).toFixed(1)+' MB';
+  if (bytes > 1e3) return (bytes/1e3).toFixed(1)+' KB';
+  return bytes+' B';
+}
+
+// ── Event wiring ─────────────────────────────────────────────────────────────
+document.getElementById('submit-btn').addEventListener('click', async () => {
+  const url = document.getElementById('url-input').value.trim();
+  const notes = document.getElementById('notes-input').value.trim();
+  if (!url) return;
+  const btn = document.getElementById('submit-btn');
+  btn.disabled = true;
+  btn.textContent = 'Starting…';
+  try {
+    const c = await postCase(url, notes);
+    document.getElementById('url-input').value = '';
+    document.getElementById('notes-input').value = '';
+    await refreshSidebar();
+    selectCase(c.id);
+  } catch(e) {
+    alert('Error: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Investigate';
+  }
+});
+
+document.getElementById('url-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('submit-btn').click();
+});
+
+document.getElementById('clear-all').addEventListener('click', async () => {
+  if (!confirm('Delete all cases?')) return;
+  await deleteAllCases();
+  currentCaseId = null;
+  clearInterval(pollTimer);
+  document.getElementById('case-view').classList.remove('visible');
+  document.getElementById('empty-state').style.display = 'flex';
+  refreshSidebar();
+});
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+(async () => {
+  await refreshSidebar();
+  const cases = await listCases().catch(()=>[]);
+  if (cases.length > 0) selectCase(cases[0].id);
+})();
+</script>
+</body>
+</html>

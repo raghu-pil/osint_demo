@@ -208,7 +208,8 @@ td a { color: var(--accent2); }
   <input id="url-input" type="text" placeholder="Paste social media URL (Twitter, Instagram, Reddit, YouTube, TikTok…)" />
   <div id="file-drop">
     <input type="file" id="file-input" accept="image/*,video/*" onchange="onFileChosen(this)">
-    <span id="file-drop-label">📎 Drop image/video or click to browse</span>
+    <img id="paste-preview" style="display:none;height:36px;width:auto;border-radius:3px;object-fit:cover;flex-shrink:0">
+    <span id="file-drop-label">📎 Paste screenshot (⌘V) · drop file · or click to browse</span>
     <span id="file-chosen"></span>
   </div>
   <input id="source-url-input" type="text" placeholder="Source URL where you found this (optional but important)" style="display:none;flex:1;min-width:180px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:var(--radius);padding:8px 10px;font-size:13px;outline:none" />
@@ -1798,17 +1799,53 @@ function setMode(mode) {
 
 function onFileChosen(input) {
   chosenFile = input.files[0] || null;
+  _updateFileDropUI(chosenFile, chosenFile?.name || null);
+}
+
+function _updateFileDropUI(file, name) {
   const label = document.getElementById('file-drop-label');
   const chosen = document.getElementById('file-chosen');
-  if (chosenFile) {
+  const preview = document.getElementById('paste-preview');
+  if (file) {
     label.style.display = 'none';
     chosen.style.display = '';
-    chosen.textContent = chosenFile.name + ' (' + fmtSize(chosenFile.size) + ')';
+    chosen.textContent = (name || 'screenshot') + ' · ' + fmtSize(file.size);
+    if (file.type.startsWith('image/')) {
+      const url = URL.createObjectURL(file);
+      preview.src = url;
+      preview.style.display = '';
+      preview.onload = () => URL.revokeObjectURL(url);
+    } else {
+      preview.style.display = 'none';
+    }
   } else {
     label.style.display = '';
     chosen.style.display = 'none';
+    preview.style.display = 'none';
+    preview.src = '';
   }
 }
+
+// Global paste handler — works anywhere on the page when in media mode
+document.addEventListener('paste', e => {
+  if (currentMode !== 'media') return;
+  const items = Array.from(e.clipboardData?.items || []);
+  const imgItem = items.find(it => it.type.startsWith('image/'));
+  if (!imgItem) return;
+  e.preventDefault();
+  const file = imgItem.getAsFile();
+  if (!file) return;
+  // Give it a sensible filename with timestamp
+  const ext = file.type.split('/')[1] || 'png';
+  const ts = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+  chosenFile = new File([file], `screenshot-${ts}.${ext}`, { type: file.type });
+  setMode('media');  // switch to media mode if not already
+  _updateFileDropUI(chosenFile, chosenFile.name);
+  // Flash the drop zone so the user sees it was received
+  const drop = document.getElementById('file-drop');
+  drop.style.borderColor = 'var(--low)';
+  setTimeout(() => drop.style.borderColor = '', 600);
+});
 
 async function postMediaCase(file, notes, sourceUrl) {
   const fd = new FormData();
@@ -2001,7 +2038,7 @@ document.getElementById('submit-btn').addEventListener('click', async () => {
       const c = await postMediaCase(chosenFile, notes, sourceUrl);
       document.getElementById('file-input').value = '';
       chosenFile = null;
-      onFileChosen({files:[]});
+      _updateFileDropUI(null, null);
       document.getElementById('source-url-input').value = '';
       document.getElementById('notes-input').value = '';
       await refreshSidebar();

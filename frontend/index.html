@@ -211,6 +211,7 @@ td a { color: var(--accent2); }
     <span id="file-drop-label">📎 Drop image/video or click to browse</span>
     <span id="file-chosen"></span>
   </div>
+  <input id="source-url-input" type="text" placeholder="Source URL where you found this (optional but important)" style="display:none;flex:1;min-width:180px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:var(--radius);padding:8px 10px;font-size:13px;outline:none" />
   <input id="notes-input" type="text" placeholder="Case notes (optional)" />
   <button id="submit-btn">Investigate</button>
 </div>
@@ -1784,6 +1785,7 @@ function setMode(mode) {
   document.getElementById('mode-media').classList.toggle('active', mode === 'media');
   document.getElementById('url-input').style.display = mode === 'url' ? '' : 'none';
   document.getElementById('file-drop').style.display = mode === 'media' ? 'flex' : 'none';
+  document.getElementById('source-url-input').style.display = mode === 'media' ? '' : 'none';
   document.getElementById('submit-btn').textContent = mode === 'media' ? 'Find All Accounts' : 'Investigate';
 }
 
@@ -1801,10 +1803,11 @@ function onFileChosen(input) {
   }
 }
 
-async function postMediaCase(file, notes) {
+async function postMediaCase(file, notes, sourceUrl) {
   const fd = new FormData();
   fd.append('file', file);
   if (notes) fd.append('notes', notes);
+  if (sourceUrl) fd.append('source_url', sourceUrl);
   const r = await fetch(API + '/media-cases', { method: 'POST', body: fd });
   if (!r.ok) throw new Error(await r.text());
   return r.json();
@@ -1822,16 +1825,21 @@ function renderDiscoveredAccounts(c) {
     </div>`;
   }
 
-  if (!accounts.length) {
-    return `<div style="color:var(--text2);padding:20px">
-      No accounts found sharing this content. ${c.errors?.length ? 'Errors: ' + escHtml(c.errors.join(', ')) : ''}
-    </div>`;
-  }
-
   const severityColor = s => s==='CRITICAL'?'var(--critical)':s==='HIGH'?'var(--high)':s==='MEDIUM'?'var(--medium)':'var(--low)';
   const platformIcon = p => ({twitter:'𝕏', instagram:'📷', youtube:'▶', reddit:'🤖', tiktok:'♪', facebook:'f', web:'🌐'}[p]||'🌐');
 
-  let html = `<div style="margin-bottom:16px;font-size:13px;color:var(--text2)">
+  const sourceUrl = inv.source_url;
+  let html = '';
+  if (sourceUrl) {
+    html += `<div style="background:rgba(248,81,73,.08);border:1px solid rgba(248,81,73,.3);border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:13px">
+      <strong style="color:var(--critical)">Source account (#1 below)</strong> was identified from the URL you provided:
+      <a href="${escHtml(sourceUrl)}" target="_blank" style="color:var(--accent2)">${escHtml(sourceUrl)}</a>
+    </div>`;
+  }
+  if (!accounts.length && !sourceUrl) {
+    return html + `<div style="color:var(--text2);padding:20px">No accounts found sharing this content. ${c.errors?.length ? 'Errors: ' + escHtml(c.errors.join(', ')) : ''}</div>`;
+  }
+  html += `<div style="margin-bottom:16px;font-size:13px;color:var(--text2)">
     Found <strong style="color:var(--text)">${accounts.length} account(s)</strong> sharing this content
     via reverse image search (${inv.raw_match_count||0} visual matches). Ranked by investigative priority.
   </div>`;
@@ -1854,11 +1862,13 @@ function renderDiscoveredAccounts(c) {
     const postUrl = a.post_url || profileUrl;
     const thumbUrl = a.avatar || a.match_thumbnail;
 
-    html += `<div class="card" style="margin-bottom:10px;border-left:3px solid ${color}">
+    const isSource = a.rank === 0;
+    html += `<div class="card" style="margin-bottom:10px;border-left:3px solid ${color}${isSource?';border:2px solid var(--critical)':''}">
+      ${isSource ? `<div style="font-size:11px;font-weight:700;color:var(--critical);margin-bottom:8px;letter-spacing:.05em">★ SOURCE — URL PROVIDED BY INVESTIGATOR</div>` : ''}
       <div style="display:flex;gap:12px;align-items:flex-start">
         <!-- Rank + severity -->
         <div style="flex-shrink:0;text-align:center;min-width:52px">
-          <div style="font-size:20px;font-weight:700;color:${color}">#${a.rank}</div>
+          <div style="font-size:20px;font-weight:700;color:${color}">${isSource?'★':'#'+a.rank}</div>
           <div style="font-size:10px;font-weight:700;color:${color};background:${color}22;border-radius:3px;padding:1px 5px;margin-top:2px">${a.severity_label}</div>
           <div style="font-size:11px;color:var(--text2);margin-top:2px">${a.severity_score}/100</div>
         </div>
@@ -1939,10 +1949,12 @@ document.getElementById('submit-btn').addEventListener('click', async () => {
     btn.disabled = true;
     btn.textContent = 'Uploading…';
     try {
-      const c = await postMediaCase(chosenFile, notes);
+      const sourceUrl = document.getElementById('source-url-input').value.trim();
+      const c = await postMediaCase(chosenFile, notes, sourceUrl);
       document.getElementById('file-input').value = '';
       chosenFile = null;
       onFileChosen({files:[]});
+      document.getElementById('source-url-input').value = '';
       document.getElementById('notes-input').value = '';
       await refreshSidebar();
       selectCase(c.id);

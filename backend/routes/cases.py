@@ -264,18 +264,58 @@ def _run_media_pipeline(case_id: str, manager: CaseManager):
 
     file_path = str(media_files[0])
 
+    # Extract source_url from notes field (stored as "source_url:URL\n...")
+    source_url = None
+    if case.notes and case.notes.startswith("source_url:"):
+        lines = case.notes.split("\n", 1)
+        source_url = lines[0][len("source_url:"):].strip()
+
     try:
         # Step 1: Reverse search
         step_start("reverse_search", "Reverse Image Search")
-        from backend.modules.media_pipeline import run_media_investigation
+        from backend.modules.media_pipeline import run_media_investigation, parse_social_url, scrape_account
         inv = run_media_investigation(file_path, api_key, max_results=15)
         case.media_investigation = {
             "public_url": inv.get("public_url"),
             "raw_match_count": len(inv.get("raw_matches", [])),
+            "source_url": source_url,
         }
-        discovered = inv.get("discovered_accounts", [])
+        discovered = list(inv.get("discovered_accounts", []))
+
+        # Inject user-provided source URL as the first account
+        if source_url:
+            parsed = parse_social_url(source_url)
+            if parsed:
+                src_acct = {**parsed, "match_engine": "user-provided source",
+                            "match_title": "Original source URL provided by investigator",
+                            "post_date": "", "source_domain": ""}
+                try:
+                    scraped = scrape_account(parsed)
+                    src_acct = {**src_acct, **{k: v for k, v in scraped.items() if v is not None}}
+                except Exception:
+                    pass
+                # Score it — it's the known origin so give it a strong base
+                src_acct["severity_score"] = 90
+                src_acct["severity_label"] = "CRITICAL"
+                src_acct["score_reasons"] = ["user-identified source of this media"]
+                # Apply known-account boost on top
+                try:
+                    from backend.modules.known_accounts import apply_known_account_scoring
+                    apply_known_account_scoring(src_acct)
+                except Exception:
+                    pass
+                src_acct["rank"] = 0
+                # Re-rank everything else
+                for a in discovered:
+                    a["rank"] = a.get("rank", 0) + 1
+                discovered.insert(0, src_acct)
+            else:
+                # Not a recognised social URL — store it as a generic source note
+                case.media_investigation["source_url_note"] = f"Source URL provided: {source_url}"
+
         case.discovered_accounts = discovered
-        step_done("reverse_search", f"{len(inv.get('raw_matches',[]))} visual matches found")
+        step_done("reverse_search", f"{len(inv.get('raw_matches',[]))} visual matches found"
+                  + (f" · source: {source_url}" if source_url else ""))
 
         # Step 2: Generate guidance from discovered accounts
         step_start("guidance", "Generating Investigation Leads")
@@ -326,6 +366,7 @@ async def create_media_case(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     notes: Optional[str] = Form(None),
+    source_url: Optional[str] = Form(None),
 ):
     """Start a media-first investigation by uploading an image or video."""
     import mimetypes, uuid as _uuid
@@ -350,10 +391,14 @@ async def create_media_case(
     # Create case
     from backend.models import Case as CaseModel
     now = datetime.now(timezone.utc).isoformat()
+    # Store source_url in notes if provided (surfaced in pipeline via case.notes)
+    combined_notes = notes or ""
+    if source_url:
+        combined_notes = f"source_url:{source_url}" + (f"\n{notes}" if notes else "")
     case = CaseModel(
         id=case_id,
         url=f"media:{safe_name}",
-        notes=notes,
+        notes=combined_notes or None,
         source_type="media_upload",
         status=CaseStatus.PENDING,
         created_at=now,

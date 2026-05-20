@@ -382,9 +382,10 @@ function renderCase(c) {
     {id:'activitylog',label: isRunning ? '⟳ Activity' : 'Activity Log', count: logCount},
     {id:'graph',    label:'Network Graph',   count: 0},
   ];
-  // Default first tab for media cases
-  if (isMediaCase && activeTab === 'guidance' && c.discovered_accounts?.length) {
-    activeTab = 'discovered';
+  // Default tab logic for media cases
+  if (isMediaCase && (activeTab === 'guidance' || activeTab === 'activitylog')) {
+    activeTab = (c.status === 'completed' || c.status === 'failed') && c.discovered_accounts?.length
+      ? 'discovered' : 'activitylog';
   }
   document.getElementById('tabs').innerHTML = tabs.map(t => `
     <div class="tab ${activeTab===t.id?'active':''}" onclick="switchTab('${t.id}')">
@@ -1897,7 +1898,7 @@ function renderDiscoveredAccounts(c) {
 
           <!-- Action buttons -->
           <div style="display:flex;gap:6px;flex-wrap:wrap">
-            <button onclick="investigateAccount('${escHtml(profileUrl)}','${escHtml(a.platform+': @'+username)}')" style="background:var(--accent2);color:#fff;border:none;border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer">Full Investigation →</button>
+            <button class="invest-btn" data-url="${escHtml(profileUrl)}" data-label="${escHtml(a.platform+': @'+username)}" style="background:var(--accent2);color:#fff;border:none;border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer">Full Investigation →</button>
             <a href="${escHtml(profileUrl)}" target="_blank" class="media-link">View Profile</a>
             ${postUrl !== profileUrl ? `<a href="${escHtml(postUrl)}" target="_blank" class="media-link">View Post</a>` : ''}
           </div>
@@ -1909,11 +1910,23 @@ function renderDiscoveredAccounts(c) {
   return html;
 }
 
-function investigateAccount(url, label) {
-  setMode('url');
-  document.getElementById('url-input').value = url;
-  document.getElementById('notes-input').value = label ? `From media investigation: ${label}` : '';
-  document.getElementById('submit-btn').click();
+async function investigateAccount(url, label) {
+  if (!url) return;
+  const btn = document.getElementById('submit-btn');
+  const prevText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Starting…';
+  try {
+    setMode('url');
+    const c = await postCase(url, label ? `From media investigation: ${label}` : '');
+    await refreshSidebar();
+    selectCase(c.id);
+  } catch(e) {
+    alert('Error starting investigation: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = prevText || 'Investigate';
+  }
 }
 
 // ── Event wiring ─────────────────────────────────────────────────────────────
@@ -1972,6 +1985,15 @@ document.getElementById('clear-all').addEventListener('click', async () => {
   document.getElementById('case-view').classList.remove('visible');
   document.getElementById('empty-state').style.display = 'flex';
   refreshSidebar();
+});
+
+// ── Delegated click for invest-btn (survives re-renders) ─────────────────────
+document.getElementById('tab-content').addEventListener('click', e => {
+  const btn = e.target.closest('.invest-btn');
+  if (!btn) return;
+  const url = btn.dataset.url;
+  const label = btn.dataset.label;
+  investigateAccount(url, label);
 });
 
 // ── Init ─────────────────────────────────────────────────────────────────────

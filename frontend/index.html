@@ -307,9 +307,15 @@ async function refreshSidebar() {
 async function selectCase(id) {
   currentCaseId = id;
   clearInterval(pollTimer);
-  activeTab = 'activitylog';  // always start on activity log so user sees progress
+  activeTab = 'activitylog';  // initial default; will be overridden below once we know case state
   try {
     const c = await getCase(id);
+    // Pick the right starting tab based on case state
+    if (c.status === 'completed' || c.status === 'failed') {
+      activeTab = c.source_type === 'media_upload'
+        ? (c.discovered_accounts?.length ? 'discovered' : 'activitylog')
+        : 'guidance';
+    }
     renderCase(c);
     if (c.status === 'running' || c.status === 'pending') {
       pollTimer = setInterval(async () => {
@@ -319,9 +325,11 @@ async function selectCase(id) {
           if (fresh.status !== 'running' && fresh.status !== 'pending') {
             clearInterval(pollTimer);
             refreshSidebar();
-            // Switch to relevant tab on completion
+            // Auto-switch from activity log to results tab when done
             if (activeTab === 'activitylog') {
-              activeTab = fresh.source_type === 'media_upload' ? 'discovered' : 'guidance';
+              activeTab = fresh.source_type === 'media_upload'
+                ? (fresh.discovered_accounts?.length ? 'discovered' : 'activitylog')
+                : 'guidance';
             }
           }
         } catch(e) { clearInterval(pollTimer); }
@@ -383,10 +391,9 @@ function renderCase(c) {
     {id:'activitylog',label: isRunning ? '⟳ Activity' : 'Activity Log', count: logCount},
     {id:'graph',    label:'Network Graph',   count: 0},
   ];
-  // Default tab logic for media cases
-  if (isMediaCase && (activeTab === 'guidance' || activeTab === 'activitylog')) {
-    activeTab = (c.status === 'completed' || c.status === 'failed') && c.discovered_accounts?.length
-      ? 'discovered' : 'activitylog';
+  // Validate activeTab is in the current tab set; fall back if not
+  if (!tabs.find(t => t.id === activeTab)) {
+    activeTab = tabs[0]?.id || 'guidance';
   }
   document.getElementById('tabs').innerHTML = tabs.map(t => `
     <div class="tab ${activeTab===t.id?'active':''}" onclick="switchTab('${t.id}')">

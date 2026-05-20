@@ -1892,8 +1892,19 @@ function renderDiscoveredAccounts(c) {
       <a href="${escHtml(sourceUrl)}" target="_blank" style="color:var(--accent2)">${escHtml(sourceUrl)}</a>
     </div>`;
   }
-  if (!accounts.length && !sourceUrl) {
-    return html + `<div style="color:var(--text2);padding:20px">No accounts found sharing this content. ${c.errors?.length ? 'Errors: ' + escHtml(c.errors.join(', ')) : ''}</div>`;
+  // Show failure reason prominently when pipeline errored
+  if (c.status === 'failed' || (c.errors && c.errors.length)) {
+    const isMissingKey = c.errors?.some(e => e.toLowerCase().includes('serpapi'));
+    html += `<div style="background:rgba(248,81,73,.1);border:1px solid rgba(248,81,73,.4);border-radius:6px;padding:12px 16px;margin-bottom:16px">
+      <div style="font-size:13px;font-weight:600;color:var(--critical);margin-bottom:6px">Investigation failed</div>
+      ${c.errors?.map(e => `<div style="font-size:12px;color:var(--text2);margin-bottom:3px">• ${escHtml(e)}</div>`).join('') || ''}
+      ${isMissingKey ? `<div style="margin-top:8px;font-size:12px;color:var(--text)">
+        <strong>Fix:</strong> open <code>config.yaml</code> on the server and set:<br>
+        <code style="background:var(--bg3);padding:2px 8px;border-radius:3px;display:inline-block;margin-top:4px">serpapi_api_key: "your_key_here"</code><br>
+        <span style="color:var(--text2)">Get a free key (100 searches/month) at <a href="https://serpapi.com" target="_blank" style="color:var(--accent2)">serpapi.com</a></span>
+      </div>` : ''}
+    </div>`;
+    if (!accounts.length && !sourceUrl) return html;
   }
   // Proactive match banner
   if (inv.proactive_matches > 0) {

@@ -90,9 +90,20 @@ fi
 echo ""
 echo "=== Setup complete ==="
 echo ""
+
+# Check if serpapi_api_key is configured
+SERPAPI_SET=$(grep -E '^serpapi_api_key:\s*".+"' config.yaml 2>/dev/null | grep -v '""' | wc -l)
+if [ "$SERPAPI_SET" -eq 0 ]; then
+  echo "⚠  ACTION REQUIRED: serpapi_api_key is not set in config.yaml"
+  echo "   Reverse image search will not work without it."
+  echo "   1. Get a free key (100 searches/month) at https://serpapi.com"
+  echo "   2. Edit config.yaml and set:  serpapi_api_key: \"your_key_here\""
+  echo ""
+fi
+
 echo "Next steps:"
 echo "  1. Edit config.yaml and set your API keys:"
-echo "     - serpapi_api_key:  serpapi.com            (free 100/month — enables reverse image search)"
+echo "     - serpapi_api_key:  serpapi.com            (free 100/month — REQUIRED for image search)"
 echo "     - hibp_api_key:     haveibeenpwned.com     (\$3.50/month)"
 echo "     - dehashed_api_key: dehashed.com           (\$5/month)"
 echo "     - intelx_api_key:   intelx.io              (free tier available)"

@@ -2001,18 +2001,23 @@ function renderDiscoveredAccounts(c) {
       </div>`;
     }
 
+    const imgUrl = inv.public_url || '';
     const renderAccountCards = (entries, color, label) => {
       if (!entries.length) return '';
       let s = `<div style="font-size:12px;font-weight:600;color:${color};margin-bottom:6px">${label}</div>
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:7px;margin-bottom:14px">`;
       for (const [username, info] of entries) {
         const wasMatched = accounts.some(a => a.username?.toLowerCase() === username);
+        // Focused reverse image search: this image restricted to the account's Twitter profile
+        const revSearchUrl = imgUrl
+          ? `https://www.google.com/searchbyimage?image_url=${encodeURIComponent(imgUrl)}&q=${encodeURIComponent('site:twitter.com/' + username + ' OR site:x.com/' + username)}`
+          : info.google_images;
         s += `<div style="background:var(--bg3);border:1px solid ${wasMatched?color:'var(--border)'};border-radius:6px;padding:7px 10px">
           <div style="font-weight:600;color:${color};margin-bottom:2px;font-size:12px">@${escHtml(username)}</div>
           <div style="color:var(--text2);font-size:10px;margin-bottom:5px;line-height:1.4">${escHtml((info.note||'').slice(0,55))}</div>
           <div style="display:flex;gap:5px;flex-wrap:wrap">
             <a href="${escHtml(info.twitter_media)}" target="_blank" class="media-link" style="font-size:10px">Media ↗</a>
-            <a href="${escHtml(info.google_images)}" target="_blank" class="media-link" style="font-size:10px">Google ↗</a>
+            <a href="${escHtml(revSearchUrl)}" target="_blank" class="media-link" style="font-size:10px" title="Reverse image search this screenshot on @${escHtml(username)}'s Twitter">Image search ↗</a>
           </div>
         </div>`;
       }

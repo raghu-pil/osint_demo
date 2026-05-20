@@ -57,28 +57,45 @@ mkdir -p cases
 echo ""
 echo "--- Installing system dependencies ---"
 if command -v apt-get &>/dev/null; then
-  apt-get install -y -qq tor curl 2>/dev/null && echo "  Installed: tor, curl" || echo "  (apt install skipped - may need sudo)"
+  apt-get install -y -qq tor curl ffmpeg tesseract-ocr 2>/dev/null \
+    && echo "  Installed: tor, curl, ffmpeg, tesseract-ocr" \
+    || echo "  (apt install skipped - may need sudo)"
 elif command -v brew &>/dev/null; then
-  brew install tor 2>/dev/null && echo "  Installed: tor (brew)" || echo "  (brew install skipped)"
+  brew install tor ffmpeg tesseract 2>/dev/null \
+    && echo "  Installed: tor, ffmpeg, tesseract (brew)" \
+    || echo "  (brew install skipped)"
 else
-  echo "  [!] Please install 'tor' manually for dark web search"
+  echo "  [!] Please install manually: tor, ffmpeg, tesseract-ocr"
 fi
+
+echo ""
+echo "--- Installing Python packages for reverse image search and OCR ---"
+$PIP install --quiet \
+  "google-search-results>=2.4.2" \
+  pytesseract \
+  PySocks \
+  2>/dev/null || echo "  (some optional packages skipped)"
 
 echo ""
 echo "--- Starting Tor daemon ---"
 if command -v service &>/dev/null; then
-  service tor start 2>/dev/null && echo "  Tor started" || tor --RunAsDaemon 1 2>/dev/null && echo "  Tor started (daemon)" || echo "  [!] Tor not started - run: service tor start"
+  service tor start 2>/dev/null && echo "  Tor started" \
+    || tor --RunAsDaemon 1 2>/dev/null && echo "  Tor started (daemon)" \
+    || echo "  [!] Tor not started - run: service tor start"
 elif command -v tor &>/dev/null; then
-  tor --RunAsDaemon 1 2>/dev/null && echo "  Tor started" || echo "  [!] Tor failed to start"
+  tor --RunAsDaemon 1 2>/dev/null && echo "  Tor started" \
+    || echo "  [!] Tor failed to start"
 fi
 
 echo ""
 echo "=== Setup complete ==="
 echo ""
 echo "Next steps:"
-echo "  1. Edit config.yaml and add API keys (optional but recommended)"
-echo "     - hibp_api_key:     haveibeenpwned.com/API/Key  (\$3.50/month)"
-echo "     - dehashed_api_key: dehashed.com               (\$5/month)"
+echo "  1. Edit config.yaml and set your API keys:"
+echo "     - serpapi_api_key:  serpapi.com            (free 100/month — enables reverse image search)"
+echo "     - hibp_api_key:     haveibeenpwned.com     (\$3.50/month)"
+echo "     - dehashed_api_key: dehashed.com           (\$5/month)"
+echo "     - intelx_api_key:   intelx.io              (free tier available)"
 echo "  2. For LLM analysis on GPU:"
 echo "     - Install Ollama: curl -fsSL https://ollama.com/install.sh | sh"
 echo "     - Pull a model:   ollama pull llama3:8b"

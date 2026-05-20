@@ -1985,33 +1985,44 @@ function renderDiscoveredAccounts(c) {
     </div>`;
   }
 
-  // Manual verification section — always visible
+  // Manual verification section — always visible, split by type
   const manualLinks = inv.manual_links || {};
-  const mEntries = Object.entries(manualLinks).filter(([,v])=>v.type==='misinfo');
+  const mEntries   = Object.entries(manualLinks).filter(([,v])=>v.type==='misinfo');
+  const fcEntries  = Object.entries(manualLinks).filter(([,v])=>v.type==='factcheck');
   const ocrKeywords = inv.ocr_keywords || [];
 
-  if (mEntries.length) {
-    html += `<div style="margin-top:20px;border-top:1px solid var(--border);padding-top:14px">
-      <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px">Verify against known misinformation accounts</div>
-      <div style="font-size:12px;color:var(--text2);margin-bottom:10px">
-        These accounts are in the known misinformation database. Even if not detected automatically,
-        manually check their recent media for this content.
-        ${ocrKeywords.length ? `<br><strong>OCR detected in image:</strong> ${ocrKeywords.map(k=>`<code style="background:var(--bg3);padding:1px 5px;border-radius:3px;font-size:11px">${escHtml(k)}</code>`).join(' ')}` : ''}
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">`;
-    for (const [username, info] of mEntries) {
-      // Highlight accounts where OCR keywords matched (they'd be in confirmed_matches)
-      const wasMatched = accounts.some(a => a.username?.toLowerCase() === username && a.match_method?.includes('ocr'));
-      html += `<div style="background:var(--bg3);border:1px solid ${wasMatched?'var(--critical)':'var(--border)'};border-radius:6px;padding:8px 10px">
-        <div style="font-weight:600;color:var(--critical);margin-bottom:3px;font-size:12px">@${escHtml(username)}</div>
-        <div style="color:var(--text2);font-size:10px;margin-bottom:6px;line-height:1.4">${escHtml((info.note||'').slice(0,55))}</div>
-        <div style="display:flex;gap:5px;flex-wrap:wrap">
-          <a href="${escHtml(info.twitter_media)}" target="_blank" class="media-link" style="font-size:10px">Media tab ↗</a>
-          <a href="${escHtml(info.google_images)}" target="_blank" class="media-link" style="font-size:10px">Google ↗</a>
-        </div>
+  if (mEntries.length || fcEntries.length) {
+    html += `<div style="margin-top:20px;border-top:1px solid var(--border);padding-top:14px">`;
+    if (ocrKeywords.length) {
+      html += `<div style="font-size:12px;color:var(--text2);margin-bottom:10px">
+        <strong>OCR detected in image:</strong>
+        ${ocrKeywords.map(k=>`<code style="background:var(--bg3);padding:1px 5px;border-radius:3px;font-size:11px">${escHtml(k)}</code>`).join(' ')}
+        <span style="color:var(--text2)"> — used to search known accounts</span>
       </div>`;
     }
-    html += `</div></div>`;
+
+    const renderAccountCards = (entries, color, label) => {
+      if (!entries.length) return '';
+      let s = `<div style="font-size:12px;font-weight:600;color:${color};margin-bottom:6px">${label}</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:7px;margin-bottom:14px">`;
+      for (const [username, info] of entries) {
+        const wasMatched = accounts.some(a => a.username?.toLowerCase() === username);
+        s += `<div style="background:var(--bg3);border:1px solid ${wasMatched?color:'var(--border)'};border-radius:6px;padding:7px 10px">
+          <div style="font-weight:600;color:${color};margin-bottom:2px;font-size:12px">@${escHtml(username)}</div>
+          <div style="color:var(--text2);font-size:10px;margin-bottom:5px;line-height:1.4">${escHtml((info.note||'').slice(0,55))}</div>
+          <div style="display:flex;gap:5px;flex-wrap:wrap">
+            <a href="${escHtml(info.twitter_media)}" target="_blank" class="media-link" style="font-size:10px">Media ↗</a>
+            <a href="${escHtml(info.google_images)}" target="_blank" class="media-link" style="font-size:10px">Google ↗</a>
+          </div>
+        </div>`;
+      }
+      s += '</div>';
+      return s;
+    };
+
+    html += renderAccountCards(mEntries,  'var(--critical)', '⚠ Check known misinformation accounts');
+    html += renderAccountCards(fcEntries, 'var(--low)',      '✓ Check fact-checkers (if they covered this, it was likely debunked)');
+    html += `</div>`;
   }
 
   return html;

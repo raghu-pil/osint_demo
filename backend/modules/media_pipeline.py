@@ -452,10 +452,18 @@ def ocr_text_search_known_accounts(
     search_text = " ".join(keywords[:4])
     logger.info("OCR text search using keywords: %s", search_text)
 
-    from backend.modules.known_accounts import MISINFO_ACCOUNTS
+    from backend.modules.known_accounts import MISINFO_ACCOUNTS, FACTCHECK_ACCOUNTS
     matches = []
 
-    for username, meta in list(MISINFO_ACCOUNTS.items())[:max_accounts]:
+    # Check misinfo + factcheck accounts — split budget roughly 60/40
+    misinfo_limit = max(1, int(max_accounts * 0.6))
+    factcheck_limit = max_accounts - misinfo_limit
+    accounts_to_check = (
+        [("misinfo", u, m) for u, m in list(MISINFO_ACCOUNTS.items())[:misinfo_limit]] +
+        [("factcheck", u, m) for u, m in list(FACTCHECK_ACCOUNTS.items())[:factcheck_limit]]
+    )
+
+    for acct_type, username, meta in accounts_to_check:
         try:
             from serpapi import GoogleSearch
             q = f'(site:twitter.com/{username} OR site:x.com/{username}) {search_text}'
@@ -470,27 +478,38 @@ def ocr_text_search_known_accounts(
             for item in organic[:3]:
                 link = item.get("link", "")
                 if "twitter.com" in link or "x.com" in link:
+                    if acct_type == "misinfo":
+                        score, label = 90, "CRITICAL"
+                        reasons = [
+                            f"OCR text match on known misinfo account @{username}",
+                            f"Keywords detected: {', '.join(keywords[:4])}",
+                            f"Known misinfo: {meta.get('note','')}",
+                        ]
+                    else:
+                        score, label = 75, "HIGH"
+                        reasons = [
+                            f"FACT-CHECKER @{username} ({meta.get('org','')}) referenced this content",
+                            f"Keywords detected: {', '.join(keywords[:4])}",
+                            "Fact-checker coverage indicates this content has been disputed/debunked",
+                        ]
                     matches.append({
                         "username": username,
                         "platform": "twitter",
                         "account_url": f"https://twitter.com/{username}",
                         "post_url": link,
-                        "known_type": "misinfo",
-                        "known_note": meta.get("note", ""),
+                        "known_type": acct_type,
+                        "known_note": meta.get("note") or meta.get("org", ""),
+                        "known_org": meta.get("org", "") if acct_type == "factcheck" else "",
                         "region": meta.get("region", ""),
                         "match_title": item.get("title", ""),
                         "match_snippet": item.get("snippet", ""),
                         "match_method": "ocr_text_search",
                         "ocr_keywords": keywords,
-                        "severity_score": 90,
-                        "severity_label": "CRITICAL",
-                        "score_reasons": [
-                            f"OCR text match on known misinfo account @{username}",
-                            f"Keywords found: {', '.join(keywords[:4])}",
-                            f"Known misinfo: {meta.get('note','')}",
-                        ],
+                        "severity_score": score,
+                        "severity_label": label,
+                        "score_reasons": reasons,
                     })
-                    break  # one match per account is enough
+                    break
             time.sleep(0.2)
         except Exception as e:
             logger.debug("OCR text search failed for @%s: %s", username, e)
@@ -539,11 +558,16 @@ def proactive_known_account_check(
         result["errors"].append("No SerpAPI key — skipping proactive check")
         return result
 
-    # Check the top N misinfo accounts with actual API calls + hash comparison
-    accounts_to_check = list(MISINFO_ACCOUNTS.items())[:max_accounts]
+    # Check misinfo + factcheck accounts — split budget roughly 60/40
+    misinfo_limit = max(1, int(max_accounts * 0.6))
+    factcheck_limit = max_accounts - misinfo_limit
+    accounts_to_check = (
+        [("misinfo", u, m) for u, m in list(MISINFO_ACCOUNTS.items())[:misinfo_limit]] +
+        [("factcheck", u, m) for u, m in list(FACTCHECK_ACCOUNTS.items())[:factcheck_limit]]
+    )
 
-    for username, meta in accounts_to_check:
-        logger.info("Proactive check: searching Google Images for @%s", username)
+    for acct_type, username, meta in accounts_to_check:
+        logger.info("Proactive check: searching Google Images for @%s (%s)", username, acct_type)
         try:
             from serpapi import GoogleSearch
             res = GoogleSearch({
@@ -576,27 +600,36 @@ def proactive_known_account_check(
                 "username": username,
                 "platform": "twitter",
                 "account_url": f"https://twitter.com/{username}",
-                "known_type": "misinfo",
-                "known_note": meta.get("note", ""),
+                "known_type": acct_type,
+                "known_note": meta.get("note") or meta.get("org", ""),
+                "known_org": meta.get("org", "") if acct_type == "factcheck" else "",
                 "region": meta.get("region", ""),
                 "google_images_count": len(img_results),
                 "best_hash_diff": best_diff,
             }
 
-            # Threshold: diff < 15 = visually similar (accounting for thumbnail compression)
             if best_diff is not None and best_diff < 15:
                 entry["match_thumbnail"] = best_match.get("thumbnail", "")
                 entry["match_title"] = best_match.get("title", "")
                 entry["post_url"] = best_match.get("link", "")
-                entry["severity_score"] = 95
-                entry["severity_label"] = "CRITICAL"
-                entry["score_reasons"] = [
-                    f"PROACTIVE MATCH — visually similar image found on known misinfo account @{username}",
-                    f"Hash similarity: {64 - best_diff}/64",
-                    f"Known misinfo: {meta.get('note','')}",
-                ]
+                if acct_type == "misinfo":
+                    entry["severity_score"] = 95
+                    entry["severity_label"] = "CRITICAL"
+                    entry["score_reasons"] = [
+                        f"PROACTIVE MATCH — visually similar image on known misinfo account @{username}",
+                        f"Hash similarity: {64 - best_diff}/64",
+                        f"Known misinfo: {meta.get('note','')}",
+                    ]
+                else:
+                    entry["severity_score"] = 80
+                    entry["severity_label"] = "HIGH"
+                    entry["score_reasons"] = [
+                        f"FACT-CHECKER @{username} ({meta.get('org','')}) has visually similar content",
+                        f"Hash similarity: {64 - best_diff}/64",
+                        "Fact-checker coverage indicates this content has been disputed/debunked",
+                    ]
                 result["confirmed_matches"].append(entry)
-                logger.info("Proactive match found: @%s (hash diff %d)", username, best_diff)
+                logger.info("Proactive match found: @%s [%s] (hash diff %d)", username, acct_type, best_diff)
             else:
                 entry["match_found"] = False
                 result["checked"].append(entry)

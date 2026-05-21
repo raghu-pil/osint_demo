@@ -271,9 +271,10 @@ def _run_media_pipeline(case_id: str, manager: CaseManager):
     raw_file = media_files[0]
     file_path = str(raw_file)
 
-    # For video files: extract keyframes and investigate each one
-    VIDEO_EXTS = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.3gp'}
-    is_video = raw_file.suffix.lower() in VIDEO_EXTS
+    # Use selected keyframe if the user picked one (video flow)
+    inv = case.media_investigation or {}
+    if inv.get("selected_frame_path"):
+        file_path = inv["selected_frame_path"]
 
     # Extract source_url from notes field (stored as "source_url:URL\n...")
     source_url = None
@@ -281,25 +282,18 @@ def _run_media_pipeline(case_id: str, manager: CaseManager):
         lines = case.notes.split("\n", 1)
         source_url = lines[0][len("source_url:"):].strip()
 
+    def _log(msg, level="info"):
+        from datetime import datetime, timezone
+        case.logs.append({"ts": datetime.now(timezone.utc).strftime("%H:%M:%S"), "msg": msg, "level": level})
+
     try:
-        # For videos: extract keyframes first, then investigate the best one
-        if is_video:
-            step_start("reverse_search", "Extracting keyframes from video…")
-            from backend.modules.reverse_search import extract_keyframes
-            kf_dir = str(case_dir / "keyframes" / raw_file.stem)
-            frames = extract_keyframes(file_path, kf_dir, n_frames=6)
-            if not frames:
-                case.errors.append("Could not extract keyframes — is ffmpeg installed?")
-                case.status = CaseStatus.FAILED
-                manager.save(case)
-                return
-            # Use the middle frame as representative (usually most informative)
-            file_path = frames[len(frames) // 2]
 
         # Step 1: Reverse search + proactive known-account check
         anthropic_key = config.get("anthropic_api_key", "")
         step_start("reverse_search",
                    "Image Analysis + Reverse Search" if anthropic_key else "Reverse Image Search + Known Account Check")
+        _log("Uploading to public host and running reverse image search…")
+        manager.save(case)
         from backend.modules.media_pipeline import run_media_investigation, parse_social_url, scrape_account
         inv = run_media_investigation(file_path, api_key, max_results=15,
                                       anthropic_api_key=anthropic_key)
@@ -399,6 +393,9 @@ def _run_media_pipeline(case_id: str, manager: CaseManager):
     manager.save(case)
 
 
+VIDEO_EXTS = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.3gp'}
+
+
 @router.post("/media-cases", response_model=Case, status_code=201)
 async def create_media_case(
     background_tasks: BackgroundTasks,
@@ -406,19 +403,21 @@ async def create_media_case(
     notes: Optional[str] = Form(None),
     source_url: Optional[str] = Form(None),
 ):
-    """Start a media-first investigation by uploading an image or video."""
-    import mimetypes, uuid as _uuid
+    """
+    Upload image → pipeline runs immediately.
+    Upload video → extract keyframes, wait for user to select one, then run pipeline.
+    """
+    import uuid as _uuid
     from datetime import datetime, timezone
-    from backend.models import CaseStatus, ProgressStep, StepStatus
+    from backend.models import CaseStatus, ProgressStep
 
     manager = get_manager()
     case_id = _uuid.uuid4().hex[:12]
 
-    # Determine file extension
     suffix = Path(file.filename or "upload").suffix.lower() or ".jpg"
     safe_name = f"upload{suffix}"
+    is_video = suffix in VIDEO_EXTS
 
-    # Save uploaded file
     case_dir = manager.case_dir(case_id)
     media_dir = case_dir / "media"
     media_dir.mkdir(parents=True, exist_ok=True)
@@ -426,19 +425,18 @@ async def create_media_case(
     content = await file.read()
     dest.write_bytes(content)
 
-    # Create case
     from backend.models import Case as CaseModel
     now = datetime.now(timezone.utc).isoformat()
-    # Store source_url in notes if provided (surfaced in pipeline via case.notes)
     combined_notes = notes or ""
     if source_url:
         combined_notes = f"source_url:{source_url}" + (f"\n{notes}" if notes else "")
+
     case = CaseModel(
         id=case_id,
         url=f"media:{safe_name}",
         notes=combined_notes or None,
         source_type="media_upload",
-        status=CaseStatus.PENDING,
+        status=CaseStatus.FRAME_SELECT if is_video else CaseStatus.PENDING,
         created_at=now,
         updated_at=now,
         steps=[
@@ -448,5 +446,68 @@ async def create_media_case(
     )
     manager.save(case)
 
-    background_tasks.add_task(_run_media_pipeline, case_id, manager)
+    if is_video:
+        # Extract keyframes in background so UI can show them for selection
+        background_tasks.add_task(_extract_keyframes_task, case_id, str(dest), manager)
+    else:
+        background_tasks.add_task(_run_media_pipeline, case_id, manager)
+
     return case
+
+
+def _extract_keyframes_task(case_id: str, video_path: str, manager: CaseManager):
+    """Extract keyframes from uploaded video and store paths on the case."""
+    from backend.modules.reverse_search import extract_keyframes
+    from pathlib import Path as P
+    case = manager.get(case_id)
+    if not case:
+        return
+    video_stem = P(video_path).stem
+    kf_dir = str(manager.case_dir(case_id) / "keyframes" / video_stem)
+    frames = extract_keyframes(video_path, kf_dir, n_frames=8)
+    # Store frame paths in media_investigation so frontend can display them
+    case.media_investigation = {
+        "keyframes": [
+            {
+                "index": i,
+                "url": f"/api/cases/{case_id}/keyframes/{P(video_path).name}/{P(f).name}",
+                "path": f,
+            }
+            for i, f in enumerate(frames)
+        ],
+        "video_path": video_path,
+        "awaiting_frame_selection": True,
+    }
+    manager.save(case)
+
+
+class FrameSelectRequest(BaseModel):
+    frame_index: int
+
+
+@router.post("/media-cases/{case_id}/select-frame")
+async def select_frame(case_id: str, req: FrameSelectRequest,
+                       background_tasks: BackgroundTasks):
+    """User selected a keyframe — run the full analysis pipeline on it."""
+    from backend.models import CaseStatus
+    manager = get_manager()
+    case = manager.get(case_id)
+    if not case:
+        raise HTTPException(404, "Case not found")
+
+    inv = case.media_investigation or {}
+    frames = inv.get("keyframes", [])
+    if req.frame_index < 0 or req.frame_index >= len(frames):
+        raise HTTPException(400, f"Invalid frame index {req.frame_index}")
+
+    selected = frames[req.frame_index]
+    # Store selected frame path so _run_media_pipeline can use it
+    inv["selected_frame_path"] = selected["path"]
+    inv["selected_frame_index"] = req.frame_index
+    inv["awaiting_frame_selection"] = False
+    case.media_investigation = inv
+    case.status = CaseStatus.PENDING
+    manager.save(case)
+
+    background_tasks.add_task(_run_media_pipeline, case_id, manager)
+    return {"started": True, "frame_index": req.frame_index}

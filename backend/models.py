@@ -6,6 +6,7 @@ from enum import Enum
 
 class CaseStatus(str, Enum):
     PENDING = "pending"
+    FRAME_SELECT = "frame_select"   # video uploaded, waiting for user to pick a frame
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"

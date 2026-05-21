@@ -72,6 +72,7 @@ class IdentityPivot(BaseModel):
 class InvestigateRequest(BaseModel):
     url: str
     notes: Optional[str] = None
+    name: Optional[str] = None
 
 
 class DiscoveredAccount(BaseModel):
@@ -133,6 +134,7 @@ class AccountEnrichment(BaseModel):
 class Case(BaseModel):
     id: str
     url: str
+    name: Optional[str] = None
     notes: Optional[str] = None
     source_type: str = "url"          # "url" | "media_upload"
     status: CaseStatus = CaseStatus.PENDING

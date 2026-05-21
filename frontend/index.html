@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>OSINT Investigation Tool</title>
+<title>authintify</title>
 <style>
 :root {
   --bg: #ffffff; --bg2: #f0f0f0; --bg3: #e8e8e8;
@@ -17,7 +17,7 @@ body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; back
 
 /* ── Top bar ── */
 #topbar { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 10px 20px; display: flex; align-items: center; gap: 10px; flex-shrink: 0; flex-wrap: wrap; }
-#topbar h1 { font-size: 15px; font-weight: 700; color: var(--text); white-space: nowrap; display: flex; align-items: center; gap: 4px; letter-spacing: -0.3px; }
+#topbar h1 { font-size: 22px; font-weight: 700; color: var(--text); white-space: nowrap; display: flex; align-items: center; gap: 4px; letter-spacing: -0.5px; }
 .mode-toggle { display: flex; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; flex-shrink: 0; }
 .mode-btn { padding: 6px 12px; font-size: 12px; border: none; background: transparent; color: var(--text2); cursor: pointer; white-space: nowrap; }
 .mode-btn.active { background: var(--accent2); color: #fff; }
@@ -42,11 +42,16 @@ body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; back
 #clear-all { background: none; border: none; color: var(--text2); font-size: 11px; cursor: pointer; }
 #clear-all:hover { color: var(--critical); }
 #case-list { overflow-y: auto; flex: 1; }
-.case-item { padding: 10px 14px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background .1s; }
+.case-item { padding: 10px 14px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background .1s; display: flex; align-items: flex-start; gap: 6px; }
 .case-item:hover { background: var(--bg3); }
 .case-item.active { background: var(--bg3); border-left: 3px solid var(--accent2); }
-.case-url { font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 230px; }
+.case-item-body { flex: 1; min-width: 0; }
+.case-url { font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.case-name { font-size: 12px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .case-meta { font-size: 11px; color: var(--text2); margin-top: 3px; display: flex; gap: 6px; align-items: center; }
+.case-delete { flex-shrink: 0; background: none; border: none; color: var(--text2); font-size: 14px; cursor: pointer; padding: 0 2px; line-height: 1; opacity: 0; transition: opacity .15s; }
+.case-item:hover .case-delete { opacity: 1; }
+.case-delete:hover { color: var(--critical); }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
 .dot-pending { background: var(--text2); }
 .dot-frame_select { background: var(--medium); }
@@ -67,7 +72,10 @@ body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; back
 #case-view.visible { display: flex; }
 
 /* ── Case header ── */
-#case-header { padding: 14px 20px; border-bottom: 1px solid var(--border); background: var(--bg2); flex-shrink: 0; }
+#case-header { padding: 14px 20px; border-bottom: 1px solid var(--border); background: var(--bg2); flex-shrink: 0; display: flex; align-items: flex-start; gap: 16px; }
+#case-header-content { flex: 1; min-width: 0; }
+#case-thumb { flex-shrink: 0; align-self: center; }
+#case-thumb img { height: 80px; max-width: 140px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); display: block; }
 #case-title { font-size: 13px; font-weight: 600; color: var(--text2); margin-bottom: 4px; }
 #case-url-display { font-size: 14px; color: var(--accent2); word-break: break-all; }
 #case-status-row { display: flex; gap: 10px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
@@ -200,7 +208,7 @@ td a { color: var(--accent2); }
 
 <!-- Top bar -->
 <div id="topbar">
-  <h1><img src="/static/logo.png" style="height:28px;width:auto;vertical-align:middle;margin-right:6px">auth-int-ify</h1>
+  <h1><img src="/static/logo.png" style="height:28px;width:auto;vertical-align:middle;margin-right:6px">authintify</h1>
   <div class="mode-toggle">
     <button class="mode-btn active" id="mode-url" onclick="setMode('url')">🔗 URL</button>
     <button class="mode-btn" id="mode-media" onclick="setMode('media')">📁 Upload Media</button>
@@ -209,11 +217,12 @@ td a { color: var(--accent2); }
   <div id="file-drop">
     <input type="file" id="file-input" accept="image/*,video/*" onchange="onFileChosen(this)">
     <img id="paste-preview" style="display:none;height:36px;width:auto;border-radius:3px;object-fit:cover;flex-shrink:0">
+    <video id="video-preview" muted preload="metadata" style="display:none;height:36px;width:auto;border-radius:3px;object-fit:cover;flex-shrink:0"></video>
     <span id="file-drop-label">📎 Paste screenshot (⌘V) · drop image or video · or click to browse</span>
     <span id="file-chosen"></span>
   </div>
   <input id="source-url-input" type="text" placeholder="Source URL where you found this (optional but important)" style="display:none;flex:1;min-width:180px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:var(--radius);padding:8px 10px;font-size:13px;outline:none" />
-  <input id="notes-input" type="text" placeholder="Case notes (optional)" />
+  <input id="case-name-input" type="text" placeholder="Case name (optional)" style="width:160px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:var(--radius);padding:8px 10px;font-size:13px;outline:none;flex-shrink:0" />
   <button id="submit-btn">Investigate</button>
 </div>
 
@@ -236,9 +245,12 @@ td a { color: var(--accent2); }
     </div>
     <div id="case-view">
       <div id="case-header">
-        <div id="case-title">Investigation</div>
-        <div id="case-url-display"></div>
-        <div id="case-status-row"></div>
+        <div id="case-header-content">
+          <div id="case-title">Investigation</div>
+          <div id="case-url-display"></div>
+          <div id="case-status-row"></div>
+        </div>
+        <div id="case-thumb"></div>
       </div>
       <div id="progress-bar"></div>
       <div id="tabs"></div>
@@ -253,6 +265,85 @@ let currentCaseId = null;
 let pollTimer = null;
 let activeTab = 'guidance';
 
+// ── Known accounts database (mirrors backend/modules/known_accounts.py) ──────
+const KNOWN_MISINFO = {
+  "insiderwb":        "India-focused disinformation; posts doctored images/videos",
+  "ghostofpakistan":  "Pakistan-linked coordinated inauthentic behaviour",
+  "hinducide":        "Anti-minority disinformation in India",
+  "sanghacharya":     "Communal disinformation",
+  "iamswarajya":      "Recurrent misattributed images and doctored videos",
+  "rightwinghindus":  "Hate-inciting doctored content",
+  "ispr_official":    "Pakistan military PR; context often distorted for India",
+  "drshahidmasood":   "Frequent debunking by PIBFactCheck & AltNews",
+  "arzeema_":         "Amplifier of ISPR narratives",
+  "ruptly":           "RT-affiliated content; often used in conflict disinfo",
+  "partisanpolitics": "Known fabricated political content",
+  "tennesseehollow":  "Repeatedly flagged for fabricated US political content",
+  "mrctv":            "Misrepresented context on media clips",
+  "dailybd24":        "Bangladeshi fake news outlet accounts",
+};
+const KNOWN_FACTCHECK = {
+  "pibfactcheck":   "PIB Fact Check (Govt. of India)",
+  "altnews":        "AltNews",
+  "altnewsindia":   "AltNews (alt handle)",
+  "smhoaxslayer":   "SM HoaxSlayer",
+  "boomlive":       "BOOM Live",
+  "thequint":       "The Quint Fact Check",
+  "quintfactcheck": "Quint WebQoof",
+  "indiatoday":     "India Today Fact Check",
+  "factcheckindia": "FactCheck India",
+  "vishvasnews":    "Vishvas News",
+  "logicalindian":  "The Logical Indian",
+  "ndtvfactcheck":  "NDTV Fact Check",
+  "dawndotcom":     "Dawn (Pakistan) fact-check",
+  "sochfactcheck":  "Soch Fact Check",
+  "afpfactcheck":   "AFP Fact Check",
+  "reutersfact":    "Reuters Fact Check",
+  "apfactcheck":    "AP Fact Check",
+  "snopes":         "Snopes",
+  "politifact":     "PolitiFact",
+  "bbcreality":     "BBC Reality Check",
+  "fullfact":       "Full Fact (UK)",
+};
+
+// Render the known-accounts check section given an optional public image URL
+function renderKnownAccountsSection(publicUrl) {
+  const imgUrl = publicUrl || '';
+  const makeSearchUrl = (username) => imgUrl
+    ? `https://www.google.com/searchbyimage?image_url=${encodeURIComponent(imgUrl)}&q=${encodeURIComponent('site:twitter.com/' + username + ' OR site:x.com/' + username)}`
+    : `https://www.google.com/search?q=%40${encodeURIComponent(username)}&tbm=isch`;
+
+  const renderCards = (dict, color, heading) => {
+    const entries = Object.entries(dict);
+    return `<div style="margin-bottom:14px">
+      <div style="font-size:12px;font-weight:600;color:${color};margin-bottom:7px">${heading}</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px">
+        ${entries.map(([username, note]) => `
+          <div style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 10px">
+            <div style="font-weight:600;color:${color};font-size:12px;margin-bottom:2px">@${escHtml(username)}</div>
+            <div style="color:var(--text2);font-size:10px;margin-bottom:5px;line-height:1.4">${escHtml(note.slice(0,55))}</div>
+            <div style="display:flex;gap:5px;flex-wrap:wrap">
+              <a href="https://twitter.com/${encodeURIComponent(username)}/media" target="_blank" class="media-link" style="font-size:10px">Media ↗</a>
+              <a href="${escHtml(makeSearchUrl(username))}" target="_blank" class="media-link" style="font-size:10px" title="${imgUrl ? 'Search this image on @'+username : 'Search @'+username}">Image search ↗</a>
+            </div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+  };
+
+  return `<div class="card" style="margin-top:18px">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+      <div class="card-title" style="margin:0">Check Known Accounts</div>
+      ${imgUrl ? '<div style="font-size:11px;color:var(--low)">✓ Image-specific search links ready</div>' : '<div style="font-size:11px;color:var(--text2)">Run reverse search first for image-specific links</div>'}
+    </div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:12px">
+      Manually verify whether this content has been shared by known misinformation accounts or already debunked by fact-checkers.
+    </div>
+    ${renderCards(KNOWN_MISINFO,   'var(--critical)', '⚠ Known misinformation accounts')}
+    ${renderCards(KNOWN_FACTCHECK, 'var(--low)',      '✓ Fact-checkers — if they posted this, it was likely investigated')}
+  </div>`;
+}
+
 // ── API helpers ───────────────────────────────────────────────────────────────
 async function api(path, opts={}) {
   const r = await fetch(API + path, opts);
@@ -260,11 +351,11 @@ async function api(path, opts={}) {
   return r.json();
 }
 
-async function postCase(url, notes) {
+async function postCase(url, notes, name) {
   return api('/cases', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({url, notes: notes||null})
+    body: JSON.stringify({url, notes: notes||null, name: name||null})
   });
 }
 
@@ -283,18 +374,36 @@ function renderSidebar(cases) {
     const d = new Date(c.created_at);
     const timeStr = d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
     const risk = c.risk_label || 'MINIMAL';
+    const _subtitle = c.source_type === 'media_upload' ? c.url.replace('media:','') : c.url;
     return `
       <div class="case-item ${c.id===currentCaseId?'active':''}" onclick="selectCase('${c.id}')">
-        <div class="case-url">${c.source_type==='media_upload' ? '📁 '+escHtml(c.url.replace('media:','')) : escHtml(c.url)}</div>
-        <div class="case-meta">
-          <span class="status-dot dot-${c.status}"></span>
-          <span>${c.status}</span>
-          ${c.platform?`<span>· ${c.platform}</span>`:''}
-          ${c.risk_score>0?`<span class="badge badge-${risk.toLowerCase()}" style="font-size:10px;height:18px">${risk} ${c.risk_score}</span>`:''}
-          <span style="margin-left:auto">${timeStr}</span>
+        <div class="case-item-body">
+          <div class="case-name">${escHtml(c.id)}${c.name ? ` (${escHtml(c.name)})` : ''}</div>
+          <div class="case-url" style="font-size:11px;color:var(--text2)">${escHtml(_subtitle)}</div>
+          <div class="case-meta">
+            <span class="status-dot dot-${c.status}"></span>
+            <span>${c.status}</span>
+            ${c.platform?`<span>· ${c.platform}</span>`:''}
+            ${c.risk_score>0?`<span class="badge badge-${risk.toLowerCase()}" style="font-size:10px;height:18px">${risk} ${c.risk_score}</span>`:''}
+            <span style="margin-left:auto">${timeStr}</span>
+          </div>
         </div>
+        <button class="case-delete" onclick="deleteCase(event,'${c.id}')" title="Delete case">×</button>
       </div>`;
   }).join('');
+}
+
+async function deleteCase(event, caseId) {
+  event.stopPropagation();
+  if (!confirm('Delete this case? This cannot be undone.')) return;
+  await fetch(API + '/cases/' + caseId, {method: 'DELETE'});
+  if (currentCaseId === caseId) {
+    currentCaseId = null;
+    clearInterval(pollTimer);
+    document.getElementById('case-view').classList.remove('visible');
+    document.getElementById('empty-state').style.display = '';
+  }
+  refreshSidebar();
 }
 
 async function refreshSidebar() {
@@ -312,10 +421,12 @@ async function selectCase(id) {
   try {
     const c = await getCase(id);
     // Pick the right starting tab based on case state
-    if (c.status === 'completed' || c.status === 'failed') {
+    if (c.status === 'frame_select') {
+      activeTab = 'media';  // go to Media tab so user can pick a keyframe
+    } else if (c.status === 'completed' || c.status === 'failed') {
       activeTab = c.source_type === 'media_upload'
         ? (c.discovered_accounts?.length ? 'discovered' : 'activitylog')
-        : 'guidance';
+        : 'media';
     }
     renderCase(c);
     if (c.status === 'running' || c.status === 'pending' || c.status === 'frame_select') {
@@ -330,7 +441,7 @@ async function selectCase(id) {
             if (activeTab === 'activitylog') {
               activeTab = fresh.source_type === 'media_upload'
                 ? (fresh.discovered_accounts?.length ? 'discovered' : 'activitylog')
-                : 'guidance';
+                : 'media';
             }
           }
         } catch(e) { clearInterval(pollTimer); }
@@ -403,21 +514,42 @@ function renderCase(c) {
   const cv = document.getElementById('case-view');
   cv.classList.add('visible');
 
-  // Header
-  document.getElementById('case-title').textContent = c.source_type === 'media_upload' ? `Media Investigation · Case ${c.id}` : `Case ${c.id}`;
-  if (c.source_type === 'media_upload') {
+  // Header — title: "{id} (name)" or "{id}"; subtitle: filename or URL
+  document.getElementById('case-title').textContent = c.name ? `${c.id} (${c.name})` : c.id;
+  document.getElementById('case-url-display').textContent =
+    c.source_type === 'media_upload' ? c.url.replace('media:', '') : c.url;
+
+  // Thumbnail (right side of header)
+  const thumbEl = document.getElementById('case-thumb');
+  let thumbSrc = null;
+  if (c.source_type === 'media_upload' && c.url?.startsWith('media:')) {
     const filename = c.url.replace('media:', '');
-    const isImage = /\.(png|jpe?g|gif|webp|bmp)$/i.test(filename);
-    const imgSrc = `/api/cases/${c.id}/media/${encodeURIComponent(filename)}`;
-    document.getElementById('case-url-display').innerHTML = isImage
-      ? `<div style="display:flex;align-items:center;gap:10px;margin-top:4px">
-           <img src="${escHtml(imgSrc)}" style="height:48px;max-width:120px;object-fit:cover;border-radius:4px;border:1px solid var(--border)" onerror="this.style.display='none'">
-           <span style="font-size:13px;color:var(--text2)">${escHtml(filename)}</span>
-         </div>`
-      : `<span>Uploaded: ${escHtml(filename)}</span>`;
-  } else {
-    document.getElementById('case-url-display').textContent = c.url;
+    const isImg = /\.(png|jpe?g|gif|webp|bmp)$/i.test(filename);
+    if (isImg) {
+      thumbSrc = `/api/cases/${c.id}/media/${encodeURIComponent(filename)}`;
+    } else {
+      // Video: prefer stored keyframe, fall back to direct disk path
+      const kfs = c.media_investigation?.keyframes || [];
+      const selIdx = c.media_investigation?.selected_frame_index;
+      const kf = selIdx != null ? kfs[selIdx] : kfs[0];
+      if (kf) {
+        thumbSrc = kf.url;
+      } else {
+        // Keyframes may have been lost from case JSON (old case) — try known path
+        thumbSrc = `/api/cases/${c.id}/keyframes/${encodeURIComponent(filename)}/kf_000.jpg`;
+      }
+    }
+  } else if (c.media_files?.length) {
+    const mf = c.media_files[0];
+    if (mf.media_type === 'image') {
+      thumbSrc = `/api/cases/${c.id}/media/${encodeURIComponent(mf.filename)}`;
+    } else if (mf.media_type === 'video') {
+      thumbSrc = `/api/cases/${c.id}/keyframes/${encodeURIComponent(mf.filename)}/kf_000.jpg`;
+    }
   }
+  thumbEl.innerHTML = thumbSrc
+    ? `<img src="${escHtml(thumbSrc)}" onerror="this.style.display='none'">`
+    : '';
 
   const sr = document.getElementById('case-status-row');
   const risk = c.risk_label || 'MINIMAL';
@@ -441,25 +573,30 @@ function renderCase(c) {
   const enr = c.account_enrichment || {};
   const isMediaCase = c.source_type === 'media_upload';
   const logCount = c.logs?.length || 0;
-  const isRunning = c.status === 'running' || c.status === 'pending';
+  const isRunning = c.status === 'running' || c.status === 'pending' || c.status === 'frame_select';
+  const rsCount = _reverseSearchResults[c.id]?.matches?.length
+    || c.media_investigation?.reverse_search_matches?.length
+    || Object.values(c.auto_actions||{}).filter(v=>v.serpapi_results?.all_matches?.length>0).reduce((s,v)=>s+v.serpapi_results.all_matches.length,0);
   const tabs = isMediaCase ? [
+    {id:'media',      label:'Media',               count: 1},
+    {id:'revsearch',  label:'Reverse Search',       count: rsCount||0},
     {id:'discovered', label:'Discovered Accounts', count: c.discovered_accounts?.length||0},
     {id:'guidance',   label:'Leads',               count: c.guidance?.length||0},
     {id:'activitylog',label: isRunning ? '⟳ Activity' : 'Activity Log', count: logCount},
   ] : [
-    {id:'guidance', label:'Leads & Actions', count: c.guidance?.length||0},
+    {id:'media',    label:'Media',           count: c.media_files?.length||0},
+    {id:'revsearch',label:'Reverse Search',  count: rsCount||0},
     {id:'post',     label:'Post',            count: c.post?1:0},
     {id:'account',  label:'Account',         count: c.account?1:0},
+    {id:'guidance', label:'Leads',           count: c.guidance?.length||0},
     {id:'timeline', label:'Timeline',        count: enr.post_count_scraped||0},
-    {id:'media',    label:'Media',           count: c.media_files?.length||0},
     {id:'identity', label:'Identity',        count: (c.identity_pivots?.length||0)+(enr.bio_emails?.length||0)+(enr.bio_links?.filter(l=>l.is_social)?.length||0)},
     {id:'network',  label:'Network',         count: (c.cross_posts?.length||0)+(c.username_search?.length||0)},
     {id:'darkweb',  label:'Dark Web',        count: c.dark_web?.length||0},
     {id:'flags',    label:'Red Flags',       count: c.red_flags?.length||0},
-    {id:'revsearch',label:'Reverse Search',  count: Object.values(c.auto_actions||{}).filter(v=>v.serpapi_results?.all_matches?.length>0).reduce((s,v)=>s+v.serpapi_results.all_matches.length,0)},
     {id:'autoact',  label:'Auto-Actions',    count: Object.keys(c.auto_actions||{}).length},
-    {id:'activitylog',label: isRunning ? '⟳ Activity' : 'Activity Log', count: logCount},
     {id:'graph',    label:'Network Graph',   count: 0},
+    {id:'activitylog',label: isRunning ? '⟳ Activity' : 'Activity Log', count: logCount},
   ];
   // Validate activeTab is in the current tab set; fall back if not
   if (!tabs.find(t => t.id === activeTab)) {
@@ -470,12 +607,6 @@ function renderCase(c) {
       ${t.label}
       ${t.count>0?`<span class="tab-badge">${t.count}</span>`:''}
     </div>`).join('');
-
-  // Video frame selection screen replaces normal tab view
-  if (c.status === 'frame_select') {
-    renderFrameSelector(c);
-    return;
-  }
 
   renderTabContent(c, activeTab);
 }
@@ -669,6 +800,13 @@ function renderGuidance(c) {
       ${c.errors.map(e=>`<div style="font-size:12px;color:var(--text2);margin-bottom:4px">• ${escHtml(e)}</div>`).join('')}
     </div>`;
   }
+
+  // Known accounts check — always appended to Leads for both URL and media cases
+  const _pubUrl = c.media_investigation?.public_url
+    || Object.values(c.auto_actions||{}).find(v=>v.serpapi_results?.public_url)?.serpapi_results?.public_url
+    || _reverseSearchResults[c.id]?.public_url
+    || '';
+  html += renderKnownAccountsSection(_pubUrl);
 
   return html;
 }
@@ -897,7 +1035,8 @@ function renderTimeline(c) {
 }
 
 // ── Reverse search state ──────────────────────────────────────────────────────
-const _rsResults = {};   // caseId+filename+ts -> result
+const _rsResults = {};              // caseId+filename+ts -> result (inline, legacy)
+const _reverseSearchResults = {};   // caseId -> latest result for Reverse Search tab
 
 async function loadKeyframes(caseId, filename, containerId) {
   const el = document.getElementById(containerId);
@@ -923,11 +1062,11 @@ async function loadKeyframes(caseId, filename, containerId) {
 
 async function runReverseSearch(caseId, filename, timestamp, resultContainerId) {
   const el = document.getElementById(resultContainerId);
-  if (!el) return;
-  // Highlight selected frame
-  el.closest('.media-card')?.querySelectorAll('img[title^="t="]').forEach(img => img.style.borderColor = 'var(--border)');
-  const tsLabel = timestamp != null ? timestamp : 'image';
-  el.innerHTML = `<div style="color:var(--text2);font-size:12px;padding:8px 0">Uploading to Catbox.moe and searching via Google Lens + Yandex…</div>`;
+  const searching = `<div style="color:var(--text2);font-size:12px;padding:8px 0">Uploading and searching via Google Lens + Yandex…</div>`;
+  if (el) el.innerHTML = searching;
+  // Also show searching state in Reverse Search tab if it's active
+  const rsTab = activeTab === 'revsearch' ? document.getElementById('tab-content') : null;
+  if (rsTab) rsTab.innerHTML = `<div style="padding:30px;text-align:center;color:var(--text2)">${searching}</div>`;
   try {
     const body = { filename };
     if (timestamp != null) body.timestamp = timestamp;
@@ -936,13 +1075,22 @@ async function runReverseSearch(caseId, filename, timestamp, resultContainerId) 
     });
     if (!r.ok) {
       const err = await r.json();
-      el.innerHTML = `<div style="color:var(--critical);font-size:12px;padding:8px 0">Error: ${escHtml(err.detail||String(err))}</div>`;
+      const errHtml = `<div style="color:var(--critical);font-size:12px;padding:8px 0">Error: ${escHtml(err.detail||String(err))}</div>`;
+      if (el) el.innerHTML = errHtml;
+      _reverseSearchResults[caseId] = {success: false, error: err.detail||String(err)};
+      activeTab = 'revsearch';
+      getCase(caseId).then(c => renderCase(c));
       return;
     }
     const data = await r.json();
-    el.innerHTML = renderReverseSearchResult(data);
+    if (el) el.innerHTML = renderReverseSearchResult(data);
+    // Store result and switch to Reverse Search tab
+    _reverseSearchResults[caseId] = data;
+    activeTab = 'revsearch';
+    getCase(caseId).then(c => renderCase(c));
   } catch(e) {
-    el.innerHTML = `<div style="color:var(--critical);font-size:12px;padding:8px 0">Error: ${escHtml(String(e))}</div>`;
+    const errHtml = `<div style="color:var(--critical);font-size:12px;padding:8px 0">Error: ${escHtml(String(e))}</div>`;
+    if (el) el.innerHTML = errHtml;
   }
 }
 
@@ -986,7 +1134,18 @@ function renderReverseSearchResult(data) {
 }
 
 function renderMedia(c) {
-  const files = c.media_files || [];
+  let files = c.media_files || [];
+
+  // For media upload cases, construct a virtual media item from the uploaded file
+  if (c.source_type === 'media_upload' && !files.length && c.url?.startsWith('media:')) {
+    const filename = c.url.replace('media:', '');
+    const suffix = filename.split('.').pop().toLowerCase();
+    const videoExts = ['mp4','mov','avi','mkv','webm','m4v','3gp'];
+    const audioExts = ['mp3','wav','ogg','m4a','aac'];
+    const mediaType = videoExts.includes(suffix) ? 'video' : audioExts.includes(suffix) ? 'audio' : 'image';
+    files = [{filename, media_type: mediaType, file_size: 0, hash_sha256: '', hash_md5: '', source_url: '', local_path: '', metadata: {}}];
+  }
+
   if (!files.length) return '<div style="color:var(--text2);padding:20px">No media files downloaded.</div>';
 
   return files.map((m, idx) => {
@@ -996,18 +1155,85 @@ function renderMedia(c) {
     const isVideo = m.media_type === 'video';
     const isImage = m.media_type === 'image';
     const isAudio = m.media_type === 'audio';
+    const isUpload = c.source_type === 'media_upload';
 
+    // ── Uploaded video: show keyframe picker or video player ──────────────────
+    if (isVideo && isUpload) {
+      const keyframes = c.media_investigation?.keyframes || [];
+      const isFrameSelect = c.status === 'frame_select';
+
+      if (isFrameSelect) {
+        const framesHtml = !keyframes.length
+          ? `<div style="color:var(--text2);text-align:center;padding:20px">
+               <div style="font-size:22px;animation:spin 1s linear infinite;display:inline-block">⟳</div>
+               <div style="margin-top:8px;font-size:13px">Extracting keyframes…</div>
+             </div>`
+          : `<div style="font-size:12px;color:var(--text2);margin-bottom:10px">Select a frame to run full analysis — Visual Intelligence, Reverse Search, and Account Discovery.</div>
+             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px">
+               ${keyframes.map((f, i) => `
+                 <div style="border:2px solid var(--border);border-radius:6px;overflow:hidden;cursor:pointer;transition:border-color .15s"
+                      onmouseover="this.style.borderColor='var(--accent2)'"
+                      onmouseout="this.style.borderColor='var(--border)'"
+                      onclick="selectFrame('${escHtml(c.id)}', ${i}, this)">
+                   <img src="${escHtml(f.url)}" style="width:100%;height:100px;object-fit:cover;display:block" onerror="this.style.opacity='.3'">
+                   <div style="padding:5px 8px;font-size:11px;color:var(--text2);background:var(--bg2)">Frame ${i + 1}</div>
+                 </div>`).join('')}
+             </div>`;
+        return `<div class="card">
+          <div style="font-size:14px;font-weight:600;margin-bottom:8px">${escHtml(m.filename)}</div>
+          <video controls style="width:100%;max-height:300px;border-radius:6px;background:#000;display:block;margin-bottom:14px">
+            <source src="${escHtml(mediaUrl)}">
+          </video>
+          ${framesHtml}
+        </div>`;
+      }
+
+      // Video has been selected / analysis running or done — show video player + keyframes for re-search
+      const selectedIdx = c.media_investigation?.selected_frame_index;
+      const selectedFrame = selectedIdx != null ? keyframes[selectedIdx] : null;
+      // Derive a fallback selected frame thumbnail from the known disk path
+      const fallbackThumb = `/api/cases/${c.id}/keyframes/${encodeURIComponent(m.filename)}/kf_000.jpg`;
+      return `<div class="card" style="margin-bottom:16px">
+        <div style="font-size:14px;font-weight:600;margin-bottom:8px">${escHtml(m.filename)}</div>
+        <video controls style="width:100%;max-height:320px;border-radius:6px;background:#000;display:block;margin-bottom:10px">
+          <source src="${escHtml(mediaUrl)}">
+        </video>
+        ${selectedFrame ? `<div style="font-size:12px;color:var(--text2);margin-bottom:8px">
+          Analysed frame: <img src="${escHtml(selectedFrame.url)}" style="height:40px;border-radius:3px;vertical-align:middle;margin-left:6px;border:1px solid var(--border)" onerror="this.style.display='none'">
+        </div>` : ''}
+        ${keyframes.length
+          ? `<div style="font-size:12px;color:var(--text2);margin-bottom:6px">Re-run on a different frame:</div>
+             <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+               ${keyframes.map((f, i) => `
+                 <div style="text-align:center;cursor:pointer;opacity:${i===selectedIdx?'1':'.75'}"
+                      onclick="selectFrame('${escHtml(c.id)}', ${i}, this)"
+                      title="Re-analyse with frame ${i+1}">
+                   <img src="${escHtml(f.url)}" style="width:80px;height:50px;object-fit:cover;border-radius:3px;border:2px solid ${i===selectedIdx?'var(--accent2)':'var(--border)'}">
+                   <div style="font-size:10px;color:var(--text2)">${i+1}</div>
+                 </div>`).join('')}
+             </div>`
+          : `<button onclick="loadKeyframes('${escHtml(c.id)}','${escHtml(m.filename)}','${kfContainerId}')"
+                     style="background:var(--accent2);color:#fff;border:none;border-radius:4px;padding:5px 12px;font-size:12px;cursor:pointer;margin-bottom:10px">
+               Load Keyframes for Reverse Search
+             </button>
+             <div id="${kfContainerId}" style="margin-bottom:10px"></div>`
+        }
+        <div id="${rsResultId}"></div>
+      </div>`;
+    }
+
+    // ── Standard rendering (URL video, image, audio) ─────────────────────────
     let mediaHtml = '';
     if (isVideo) {
       mediaHtml = `
         <video controls style="width:100%;max-height:360px;border-radius:6px;background:#000;display:block;margin-bottom:12px">
-          <source src="${mediaUrl}" type="video/mp4">
+          <source src="${escHtml(mediaUrl)}">
           Your browser does not support video playback.
         </video>`;
     } else if (isImage) {
-      mediaHtml = `<img src="${mediaUrl}" style="max-width:100%;max-height:400px;border-radius:6px;display:block;margin:0 auto 12px;cursor:pointer" loading="lazy" onerror="this.style.display='none'" onclick="window.open('${mediaUrl}','_blank')">`;
+      mediaHtml = `<img src="${escHtml(mediaUrl)}" style="max-width:100%;max-height:400px;border-radius:6px;display:block;margin:0 auto 12px;cursor:pointer" loading="lazy" onerror="this.style.display='none'" onclick="window.open('${escHtml(mediaUrl)}','_blank')">`;
     } else if (isAudio) {
-      mediaHtml = `<audio controls style="width:100%;margin-bottom:12px"><source src="${mediaUrl}"></audio>`;
+      mediaHtml = `<audio controls style="width:100%;margin-bottom:12px"><source src="${escHtml(mediaUrl)}"></audio>`;
     }
 
     const searchBtn = (isImage || isVideo)
@@ -1261,11 +1487,34 @@ function renderActivityLog(c, el) {
 }
 
 function renderReverseSearch(c) {
+  // 1. Most recent manual frame-click result (any case type)
+  const manual = _reverseSearchResults[c.id];
+  if (manual) {
+    const frameLabel = `<div style="font-size:11px;color:var(--text2);margin-bottom:12px">Results from selected frame — click a different frame in the Media tab to update.</div>`;
+    return frameLabel + (manual.success === false
+      ? `<div style="color:var(--critical);font-size:13px">Search error: ${escHtml(manual.error||'unknown')}</div>`
+      : renderReverseSearchResult(manual));
+  }
+
+  // 2. Upload pipeline results stored in media_investigation
+  const uploadMatches = c.media_investigation?.reverse_search_matches;
+  if (c.source_type === 'media_upload' && uploadMatches != null) {
+    if (!uploadMatches.length) {
+      return `<div style="color:var(--low);padding:20px">✓ No visual matches found — image appears unique on the web.<br>
+        <span style="font-size:12px;color:var(--text2)">Click a frame in the Media tab to run a fresh search on a specific frame.</span></div>`;
+    }
+    return `<div style="font-size:11px;color:var(--text2);margin-bottom:12px">Results from the investigation pipeline. Click a frame in the Media tab to search a specific frame.</div>`
+      + renderReverseSearchResult({success: true, matches: uploadMatches,
+          earliest_match: uploadMatches.find(m => m.date) || null});
+  }
+
+  // 3. URL cases: results from auto_actions pipeline
   const actions = c.auto_actions || {};
   const revEntries = Object.entries(actions).filter(([k]) => k.startsWith('reverse_search_'));
 
   if (!revEntries.length) {
-    return `<div style="color:var(--text2);padding:20px">No media files found to reverse search. Run an investigation first.</div>`;
+    return `<div style="color:var(--text2);padding:20px">No reverse search results yet.<br>
+      <span style="font-size:12px">Click a frame in the Media tab to run a search.</span></div>`;
   }
 
   const hasKey = revEntries.some(([,v]) => v.serpapi_results && !v.serpapi_results?.error?.includes('No SerpAPI'));
@@ -1956,24 +2205,35 @@ function onFileChosen(input) {
 function _updateFileDropUI(file, name) {
   const label = document.getElementById('file-drop-label');
   const chosen = document.getElementById('file-chosen');
-  const preview = document.getElementById('paste-preview');
+  const imgPreview = document.getElementById('paste-preview');
+  const vidPreview = document.getElementById('video-preview');
   if (file) {
     label.style.display = 'none';
     chosen.style.display = '';
     chosen.textContent = (name || 'screenshot') + ' · ' + fmtSize(file.size);
     if (file.type.startsWith('image/')) {
       const url = URL.createObjectURL(file);
-      preview.src = url;
-      preview.style.display = '';
-      preview.onload = () => URL.revokeObjectURL(url);
+      imgPreview.src = url;
+      imgPreview.style.display = '';
+      imgPreview.onload = () => URL.revokeObjectURL(url);
+      vidPreview.style.display = 'none';
+    } else if (file.type.startsWith('video/')) {
+      const url = URL.createObjectURL(file);
+      vidPreview.src = url;
+      vidPreview.style.display = '';
+      vidPreview.currentTime = 1; // seek to 1s to get a representative frame
+      imgPreview.style.display = 'none';
     } else {
-      preview.style.display = 'none';
+      imgPreview.style.display = 'none';
+      vidPreview.style.display = 'none';
     }
   } else {
     label.style.display = '';
     chosen.style.display = 'none';
-    preview.style.display = 'none';
-    preview.src = '';
+    imgPreview.style.display = 'none';
+    imgPreview.src = '';
+    vidPreview.style.display = 'none';
+    vidPreview.src = '';
   }
 }
 
@@ -1998,11 +2258,12 @@ document.addEventListener('paste', e => {
   setTimeout(() => drop.style.borderColor = '', 600);
 });
 
-async function postMediaCase(file, notes, sourceUrl) {
+async function postMediaCase(file, notes, sourceUrl, name) {
   const fd = new FormData();
   fd.append('file', file);
   if (notes) fd.append('notes', notes);
   if (sourceUrl) fd.append('source_url', sourceUrl);
+  if (name) fd.append('name', name);
   const r = await fetch(API + '/media-cases', { method: 'POST', body: fd });
   if (!r.ok) throw new Error(await r.text());
   return r.json();
@@ -2153,7 +2414,13 @@ function renderDiscoveredAccounts(c) {
             ${a.known_type === 'misinfo' ? `<span style="font-size:10px;font-weight:700;background:rgba(248,81,73,.2);color:var(--critical);padding:1px 7px;border-radius:3px">⚠ KNOWN MISINFO</span>` : ''}
             ${a.known_type === 'factcheck' ? `<span style="font-size:10px;font-weight:700;background:rgba(63,185,80,.15);color:var(--low);padding:1px 7px;border-radius:3px">✓ FACT-CHECKER: ${escHtml(a.known_org||'')}</span>` : ''}
             ${a.known_type === 'state_media' ? `<span style="font-size:10px;font-weight:700;background:rgba(240,136,62,.15);color:var(--high);padding:1px 7px;border-radius:3px">STATE MEDIA</span>` : ''}
-            <span style="font-size:10px;color:var(--text2);margin-left:auto">via ${escHtml(a.match_engine||'')}</span>
+            ${(()=>{
+              const e = a.match_engine||'';
+              if (e === 'semantic_search') return `<span style="font-size:10px;background:rgba(21,101,192,.12);color:var(--accent2);padding:1px 7px;border-radius:3px;margin-left:auto" title="Found via Claude image analysis + content search">📝 content match</span>`;
+              if (e === 'google_lens' || e === 'yandex' || e === 'bing') return `<span style="font-size:10px;background:rgba(210,153,34,.12);color:var(--medium);padding:1px 7px;border-radius:3px;margin-left:auto" title="Found via visual reverse image search">🔍 visual match</span>`;
+              if (e === 'user-provided source') return '';
+              return e ? `<span style="font-size:10px;color:var(--text2);margin-left:auto">via ${escHtml(e)}</span>` : '';
+            })()}
           </div>
 
           ${a.bio ? `<div style="font-size:12px;color:var(--text2);margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(a.bio)}">${escHtml(a.bio.slice(0,100))}</div>` : ''}
@@ -2167,6 +2434,8 @@ function renderDiscoveredAccounts(c) {
           </div>
 
           ${a.post_text ? `<div style="font-size:12px;background:var(--bg3);border-radius:4px;padding:6px 8px;margin-bottom:6px;border-left:2px solid ${color};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">"${escHtml(a.post_text.slice(0,120))}"</div>` : ''}
+          ${a.match_engine === 'semantic_search' && a._search_query ? `<div style="font-size:10px;color:var(--text2);margin-bottom:6px">Found via query: <em>${escHtml(a._search_query.slice(0,80))}</em></div>` : ''}
+          ${a.match_engine === 'semantic_search' && a.match_title ? `<div style="font-size:11px;color:var(--text2);margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(a.match_title)}">📄 ${escHtml(a.match_title.slice(0,100))}</div>` : ''}
 
           <!-- Score reasons -->
           <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px">
@@ -2253,7 +2522,7 @@ async function investigateAccount(url, label) {
 
 // ── Event wiring ─────────────────────────────────────────────────────────────
 document.getElementById('submit-btn').addEventListener('click', async () => {
-  const notes = document.getElementById('notes-input').value.trim();
+  const caseName = document.getElementById('case-name-input').value.trim();
   const btn = document.getElementById('submit-btn');
 
   if (currentMode === 'media') {
@@ -2262,12 +2531,12 @@ document.getElementById('submit-btn').addEventListener('click', async () => {
     btn.textContent = 'Uploading…';
     try {
       const sourceUrl = document.getElementById('source-url-input').value.trim();
-      const c = await postMediaCase(chosenFile, notes, sourceUrl);
+      const c = await postMediaCase(chosenFile, null, sourceUrl, caseName);
       document.getElementById('file-input').value = '';
       chosenFile = null;
       _updateFileDropUI(null, null);
       document.getElementById('source-url-input').value = '';
-      document.getElementById('notes-input').value = '';
+      document.getElementById('case-name-input').value = '';
       await refreshSidebar();
       selectCase(c.id);
     } catch(e) {
@@ -2284,9 +2553,9 @@ document.getElementById('submit-btn').addEventListener('click', async () => {
   btn.disabled = true;
   btn.textContent = 'Starting…';
   try {
-    const c = await postCase(url, notes);
+    const c = await postCase(url, null, caseName);
     document.getElementById('url-input').value = '';
-    document.getElementById('notes-input').value = '';
+    document.getElementById('case-name-input').value = '';
     await refreshSidebar();
     selectCase(c.id);
   } catch(e) {

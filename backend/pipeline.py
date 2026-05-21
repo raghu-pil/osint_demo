@@ -41,11 +41,12 @@ class CaseManager:
         self.cases_dir = Path(cases_dir)
         self.cases_dir.mkdir(parents=True, exist_ok=True)
 
-    def create(self, url: str, notes: Optional[str] = None) -> Case:
+    def create(self, url: str, notes: Optional[str] = None, name: Optional[str] = None) -> Case:
         case_id = uuid.uuid4().hex[:12]
         case = Case(
             id=case_id,
             url=url,
+            name=name or None,
             notes=notes,
             status=CaseStatus.PENDING,
             created_at=_now(),

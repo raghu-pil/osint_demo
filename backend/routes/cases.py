@@ -24,7 +24,7 @@ def get_manager() -> CaseManager:
 @router.post("/cases", response_model=Case, status_code=201)
 async def create_case(req: InvestigateRequest, background_tasks: BackgroundTasks):
     manager = get_manager()
-    case = manager.create(req.url, req.notes)
+    case = manager.create(req.url, req.notes, req.name)
     background_tasks.add_task(run_pipeline, case.id, manager)
     return case
 
@@ -272,9 +272,9 @@ def _run_media_pipeline(case_id: str, manager: CaseManager):
     file_path = str(raw_file)
 
     # Use selected keyframe if the user picked one (video flow)
-    inv = case.media_investigation or {}
-    if inv.get("selected_frame_path"):
-        file_path = inv["selected_frame_path"]
+    saved_inv = dict(case.media_investigation or {})   # preserve keyframes/frame metadata
+    if saved_inv.get("selected_frame_path"):
+        file_path = saved_inv["selected_frame_path"]
 
     # Extract source_url from notes field (stored as "source_url:URL\n...")
     source_url = None
@@ -295,21 +295,26 @@ def _run_media_pipeline(case_id: str, manager: CaseManager):
         _log("Uploading to public host and running reverse image search…")
         manager.save(case)
         from backend.modules.media_pipeline import run_media_investigation, parse_social_url, scrape_account
-        inv = run_media_investigation(file_path, api_key, max_results=15,
-                                      anthropic_api_key=anthropic_key)
-        proactive = inv.get("proactive_check", {})
+        pipeline_result = run_media_investigation(file_path, api_key, max_results=15,
+                                                  anthropic_api_key=anthropic_key)
+        proactive = pipeline_result.get("proactive_check", {})
         n_proactive = len(proactive.get("confirmed_matches", []))
-        case.media_investigation = {
-            "public_url": inv.get("public_url"),
-            "raw_match_count": len(inv.get("raw_matches", [])),
+        # Merge pipeline results into saved_inv so keyframes/frame-selection metadata is preserved
+        raw_matches = pipeline_result.get("raw_matches", [])
+        saved_inv.update({
+            "public_url": pipeline_result.get("public_url"),
+            "raw_match_count": len(raw_matches),
+            "reverse_search_matches": raw_matches,
             "source_url": source_url,
             "proactive_matches": n_proactive,
             "proactive_checked": len(proactive.get("checked", [])),
             "manual_links": proactive.get("manual_links", {}),
             "ocr_keywords": proactive.get("ocr_keywords", []),
-            "llm_analysis": inv.get("llm_analysis"),
-            "context_search": inv.get("context_search"),
-        }
+            "llm_analysis": pipeline_result.get("llm_analysis"),
+            "context_search": pipeline_result.get("context_search"),
+        })
+        case.media_investigation = saved_inv
+        inv = pipeline_result   # alias for the rest of this function
         discovered = list(inv.get("discovered_accounts", []))
 
         # Inject user-provided source URL as the first account
@@ -402,20 +407,26 @@ async def create_media_case(
     file: UploadFile = File(...),
     notes: Optional[str] = Form(None),
     source_url: Optional[str] = Form(None),
+    name: Optional[str] = Form(None),
 ):
     """
     Upload image → pipeline runs immediately.
     Upload video → extract keyframes, wait for user to select one, then run pipeline.
     """
     import uuid as _uuid
+    import re as _re
     from datetime import datetime, timezone
     from backend.models import CaseStatus, ProgressStep
 
     manager = get_manager()
     case_id = _uuid.uuid4().hex[:12]
 
-    suffix = Path(file.filename or "upload").suffix.lower() or ".jpg"
-    safe_name = f"upload{suffix}"
+    original_name = file.filename or "upload"
+    suffix = Path(original_name).suffix.lower() or ".jpg"
+    # Sanitize: keep alphanumerics, dots, hyphens, underscores
+    base = Path(original_name).stem
+    safe_base = _re.sub(r'[^\w.\-]', '_', base)[:64] or "upload"
+    safe_name = safe_base + suffix
     is_video = suffix in VIDEO_EXTS
 
     case_dir = manager.case_dir(case_id)
@@ -434,6 +445,7 @@ async def create_media_case(
     case = CaseModel(
         id=case_id,
         url=f"media:{safe_name}",
+        name=name or None,
         notes=combined_notes or None,
         source_type="media_upload",
         status=CaseStatus.FRAME_SELECT if is_video else CaseStatus.PENDING,

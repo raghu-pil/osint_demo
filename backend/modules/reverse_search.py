@@ -183,10 +183,21 @@ def extract_keyframes(video_path: str, output_dir: str, n_frames: int = 5) -> Li
 # ── SerpAPI search ────────────────────────────────────────────────────────────
 
 def _check_serpapi_error(result: dict) -> None:
-    """Raise a clear exception if SerpAPI returned an account/quota error."""
+    """Raise only for account/quota/auth errors. Ignore 'no results' responses."""
     err = result.get("error", "")
-    if err:
-        raise RuntimeError(f"SerpAPI error: {err}")
+    if not err:
+        return
+    # These are legitimate "nothing found" responses — not errors
+    no_results_phrases = [
+        "hasn't returned any results",
+        "no results",
+        "no visual matches",
+    ]
+    if any(p in err.lower() for p in no_results_phrases):
+        logger.info("SerpAPI returned no results (not an error): %s", err)
+        return
+    # Anything else (quota, auth, invalid key) is a real error
+    raise RuntimeError(f"SerpAPI error: {err}")
 
 
 def _search_google_lens(api_key: str, image_url: str, max_results: int = 10) -> List[Dict]:

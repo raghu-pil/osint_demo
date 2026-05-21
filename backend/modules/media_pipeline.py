@@ -767,6 +767,30 @@ def run_media_investigation(
                 "post_date": match.get("date", ""),
             }
 
+    # Also parse URLs from Claude's semantic context search (finds accounts by content,
+    # not just visual similarity — catches the same person/event shared under different images)
+    ctx = result.get("context_search") or {}
+    if ctx.get("success"):
+        for item in ctx.get("google", []) + ctx.get("youtube", []):
+            url = item.get("link", "")
+            if not url:
+                continue
+            parsed = parse_social_url(url)
+            if not parsed:
+                continue
+            acct_key = parsed.get("username") or (parsed.get("account_url") or url)[:60]
+            key = (parsed["platform"], acct_key)
+            if key not in seen_accounts:  # visual match takes priority if already found
+                seen_accounts[key] = {
+                    **parsed,
+                    "match_engine": "semantic_search",
+                    "match_title": item.get("title", ""),
+                    "source_domain": item.get("source", "") or item.get("channel", ""),
+                    "post_date": item.get("published", ""),
+                    "_search_query": item.get("query", ""),
+                }
+        logger.info("After semantic search: %d total account candidates", len(seen_accounts))
+
     # Step 4: scrape each social media account (skip generic web)
     accounts = []
     for (platform, key), info in seen_accounts.items():

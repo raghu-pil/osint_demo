@@ -182,6 +182,13 @@ def extract_keyframes(video_path: str, output_dir: str, n_frames: int = 5) -> Li
 
 # ── SerpAPI search ────────────────────────────────────────────────────────────
 
+def _check_serpapi_error(result: dict) -> None:
+    """Raise a clear exception if SerpAPI returned an account/quota error."""
+    err = result.get("error", "")
+    if err:
+        raise RuntimeError(f"SerpAPI error: {err}")
+
+
 def _search_google_lens(api_key: str, image_url: str, max_results: int = 10) -> List[Dict]:
     matches = []
     try:
@@ -191,6 +198,7 @@ def _search_google_lens(api_key: str, image_url: str, max_results: int = 10) -> 
             "url": image_url,
             "api_key": api_key,
         }).get_dict()
+        _check_serpapi_error(results)
 
         for item in results.get("visual_matches", [])[:max_results]:
             matches.append({
@@ -202,6 +210,8 @@ def _search_google_lens(api_key: str, image_url: str, max_results: int = 10) -> 
                 "date": item.get("date", ""),
                 "snippet": item.get("snippet", ""),
             })
+    except RuntimeError:
+        raise   # propagate quota/account errors up
     except Exception as e:
         logger.warning("Google Lens search failed: %s", e)
     return matches

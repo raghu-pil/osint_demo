@@ -43,8 +43,9 @@ async def health():
     return {"status": "ok", "version": "1.0.0"}
 
 
-# Serve frontend
+# Serve frontend static assets (logo, etc.)
 FRONTEND = ROOT / "frontend"
+app.mount("/static", StaticFiles(directory=str(FRONTEND)), name="static")
 
 
 @app.get("/", response_class=HTMLResponse)

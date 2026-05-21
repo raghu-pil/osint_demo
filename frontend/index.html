@@ -470,7 +470,7 @@ function renderFrameSelector(c) {
   tc.innerHTML = `
     <div style="font-size:15px;font-weight:600;margin-bottom:6px">Select a frame to analyse</div>
     <div style="font-size:13px;color:var(--text2);margin-bottom:18px">
-      Pick the most informative frame — it will be used for reverse image search, visual intelligence, and account discovery.
+      Pick the most informative frame — it will be used for reverse image search, image analysis, and account discovery.
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px">
       ${frames.map((f, i) => `
@@ -589,11 +589,7 @@ function renderCase(c) {
     {id:'post',     label:'Post',            count: c.post?1:0},
     {id:'account',  label:'Account',         count: c.account?1:0},
     {id:'guidance', label:'Leads',           count: c.guidance?.length||0},
-    {id:'timeline', label:'Timeline',        count: enr.post_count_scraped||0},
-    {id:'identity', label:'Identity',        count: (c.identity_pivots?.length||0)+(enr.bio_emails?.length||0)+(enr.bio_links?.filter(l=>l.is_social)?.length||0)},
-    {id:'network',  label:'Network',         count: (c.cross_posts?.length||0)+(c.username_search?.length||0)},
     {id:'darkweb',  label:'Dark Web',        count: c.dark_web?.length||0},
-    {id:'flags',    label:'Red Flags',       count: c.red_flags?.length||0},
     {id:'autoact',  label:'Auto-Actions',    count: Object.keys(c.auto_actions||{}).length},
     {id:'graph',    label:'Network Graph',   count: 0},
     {id:'activitylog',label: isRunning ? '⟳ Activity' : 'Activity Log', count: logCount},
@@ -817,7 +813,7 @@ function renderGuidance(c) {
   // 1. Deepfake / original source (highest priority — shown first)
   if (_isDeepfake || _origResults.length) {
     html += `<div class="card" style="border-left:3px solid var(--high);margin-bottom:14px">
-      <div class="card-title" style="color:var(--high)">🎭 Deepfake / Lipsync — Original Source Search</div>`;
+      <div class="card-title" style="color:var(--high)">🔍 Source Search</div>`;
     if (_visualCtx) {
       html += `<div style="background:rgba(230,81,0,.08);border:1px solid rgba(230,81,0,.2);border-radius:4px;padding:8px 10px;font-size:12px;margin-bottom:10px">
         <strong style="color:var(--high)">Visual fingerprint (search for these characteristics to find the original):</strong><br>
@@ -856,7 +852,7 @@ function renderGuidance(c) {
     const matchColor = match.startsWith('DOES NOT MATCH') ? 'var(--critical)'
       : match.startsWith('MATCHES') ? 'var(--low)' : 'var(--medium)';
     html += `<div class="card" style="margin-bottom:14px">
-      <div class="card-title">Visual Intelligence (Image + Post Analysis)</div>`;
+      <div class="card-title">Image & Content Analysis</div>`;
     if (match) {
       html += `<div style="background:${matchColor}18;border:1px solid ${matchColor}44;border-radius:4px;padding:8px 12px;margin-bottom:8px;font-size:12px">
         <strong style="color:${matchColor}">Context check:</strong> ${escHtml(match)}
@@ -897,7 +893,7 @@ function renderIntelligence(intel) {
   if (!intel) return '';
   if (!intel.success) {
     return `<div class="card" style="border-color:var(--border)">
-      <div class="card-title">Intelligence Summary</div>
+      <div class="card-title">Content Analysis</div>
       <div style="font-size:12px;color:var(--text2)">${escHtml(intel.error || 'Analysis unavailable')}</div>
     </div>`;
   }
@@ -914,7 +910,7 @@ function renderIntelligence(intel) {
 
   let html = `<div class="card" style="border-left:3px solid ${assessColor}">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <div class="card-title" style="margin:0">Intelligence Summary</div>
+      <div class="card-title" style="margin:0">Content Analysis</div>
       <span style="font-size:12px;font-weight:600;color:${assessColor}">${escHtml(assessLabel)}</span>
     </div>`;
 
@@ -985,7 +981,7 @@ function renderImageAnalysisCard(c) {
   let html = `<div class="card" style="margin-bottom:12px;border-left:3px solid ${matchColor}">
     <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
       <div class="card-title" style="margin:0">Visual + Content Analysis</div>
-      <span style="font-size:11px;color:var(--text2)">Image analysed alongside post text</span>
+      <span style="font-size:11px;color:var(--text2)">Image analysed in context of post</span>
     </div>`;
 
   if (match) {
@@ -1006,7 +1002,7 @@ function renderImageAnalysisCard(c) {
   const visualCtx = intel.deepfake_visual_context || img.deepfake_visual_context || '';
   if (isDeepfake || origResults.length) {
     html += `<div style="margin-top:12px;border-top:2px solid var(--high);padding-top:10px">
-      <div style="font-size:12px;font-weight:700;color:var(--high);margin-bottom:6px">🎭 Deepfake / Lipsync Detected — Original Source Search</div>`;
+      <div style="font-size:12px;font-weight:700;color:var(--high);margin-bottom:6px">🔍 Source Search</div>`;
     if (visualCtx) {
       html += `<div style="background:rgba(230,81,0,.08);border:1px solid rgba(230,81,0,.25);border-radius:4px;padding:8px 10px;font-size:12px;margin-bottom:8px">
         <strong style="color:var(--high)">Visual fingerprint for finding original:</strong><br>
@@ -1179,6 +1175,8 @@ function renderAccount(c) {
     </div>`;
   }
 
+  // Append identity / cross-platform data below account info
+  html += _renderIdentityContent(c);
   return html;
 }
 
@@ -1340,7 +1338,7 @@ function renderMedia(c) {
                <div style="font-size:22px;animation:spin 1s linear infinite;display:inline-block">⟳</div>
                <div style="margin-top:8px;font-size:13px">Extracting keyframes…</div>
              </div>`
-          : `<div style="font-size:12px;color:var(--text2);margin-bottom:10px">Select a frame to run full analysis — Visual Intelligence, Reverse Search, and Account Discovery.</div>
+          : `<div style="font-size:12px;color:var(--text2);margin-bottom:10px">Select a frame to run full analysis — Image Analysis, Reverse Search, and Account Discovery.</div>
              <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px">
                ${keyframes.map((f, i) => `
                  <div style="border:2px solid var(--border);border-radius:6px;overflow:hidden;cursor:pointer;transition:border-color .15s"
@@ -1436,7 +1434,9 @@ function renderMedia(c) {
   }).join('');
 }
 
-function renderIdentity(c) {
+function renderIdentity(c) { return _renderIdentityContent(c); }
+
+function _renderIdentityContent(c) {
   const pivots = c.identity_pivots || [];
   const enr = c.account_enrichment || {};
   let html = '';
@@ -2483,7 +2483,7 @@ function renderDiscoveredAccounts(c) {
   const ctx = inv.context_search;
   if (llm?.success) {
     html += `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:16px">
-      <div style="font-size:13px;font-weight:600;color:var(--accent2);margin-bottom:10px">Visual Intelligence</div>`;
+      <div style="font-size:13px;font-weight:600;color:var(--accent2);margin-bottom:10px">Image & Content Analysis</div>`;
 
     if (llm.person)  html += `<div style="display:flex;gap:8px;margin-bottom:6px;font-size:12px"><span style="color:var(--text2);min-width:80px;flex-shrink:0">Person</span><span style="color:var(--text)">${escHtml(llm.person)}</span></div>`;
     if (llm.event)   html += `<div style="display:flex;gap:8px;margin-bottom:6px;font-size:12px"><span style="color:var(--text2);min-width:80px;flex-shrink:0">Event</span><span style="color:var(--text)">${escHtml(llm.event)}</span></div>`;
@@ -2535,7 +2535,7 @@ function renderDiscoveredAccounts(c) {
     html += '</div>';
   } else if (llm && !llm.success) {
     html += `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:var(--text2)">
-      Image analysis unavailable: ${escHtml(llm.error || 'unknown error')}
+      Analysis unavailable: ${escHtml(llm.error || 'unknown error')}
       ${llm.error?.includes('not set') ? ' — add <code>anthropic_api_key</code> to config.yaml' : ''}
     </div>`;
   }
@@ -2602,7 +2602,7 @@ function renderDiscoveredAccounts(c) {
             ${a.known_type === 'state_media' ? `<span style="font-size:10px;font-weight:700;background:rgba(240,136,62,.15);color:var(--high);padding:1px 7px;border-radius:3px">STATE MEDIA</span>` : ''}
             ${(()=>{
               const e = a.match_engine||'';
-              if (e === 'semantic_search') return `<span style="font-size:10px;background:rgba(21,101,192,.12);color:var(--accent2);padding:1px 7px;border-radius:3px;margin-left:auto" title="Found via Claude image analysis + content search">📝 content match</span>`;
+              if (e === 'semantic_search') return `<span style="font-size:10px;background:rgba(21,101,192,.12);color:var(--accent2);padding:1px 7px;border-radius:3px;margin-left:auto" title="Found via content search">📝 content match</span>`;
               if (e === 'google_lens' || e === 'yandex' || e === 'bing') return `<span style="font-size:10px;background:rgba(210,153,34,.12);color:var(--medium);padding:1px 7px;border-radius:3px;margin-left:auto" title="Found via visual reverse image search">🔍 visual match</span>`;
               if (e === 'user-provided source') return '';
               return e ? `<span style="font-size:10px;color:var(--text2);margin-left:auto">via ${escHtml(e)}</span>` : '';

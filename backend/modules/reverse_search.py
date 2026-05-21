@@ -51,29 +51,96 @@ def _upload_imgur(file_path: str) -> Optional[str]:
     return None
 
 
+def _upload_freeimage(file_path: str) -> Optional[str]:
+    """Upload to freeimage.host (anonymous, no account needed)."""
+    import base64
+    try:
+        with open(file_path, "rb") as f:
+            data = base64.b64encode(f.read()).decode()
+        r = requests.post(
+            "https://freeimage.host/api/1/upload",
+            data={"key": "6d207e02198a847aa98d0a2a901485a5", "source": data, "format": "json"},
+            timeout=30,
+        )
+        if r.status_code == 200:
+            url = r.json().get("image", {}).get("url")
+            if url:
+                logger.info("Uploaded to freeimage.host: %s", url)
+                return url
+        logger.warning("freeimage.host upload failed: %s", r.text[:80])
+    except Exception as e:
+        logger.warning("freeimage.host upload error: %s", e)
+    return None
+
+
+def _upload_tmpfiles(file_path: str) -> Optional[str]:
+    """Upload to tmpfiles.org (anonymous, 60-day expiry)."""
+    try:
+        with open(file_path, "rb") as f:
+            r = requests.post("https://tmpfiles.org/api/v1/upload",
+                              files={"file": f}, timeout=30)
+        if r.status_code == 200:
+            url = r.json().get("data", {}).get("url", "")
+            if url:
+                direct = url.replace("tmpfiles.org/", "tmpfiles.org/dl/")
+                logger.info("Uploaded to tmpfiles.org: %s", direct)
+                return direct
+        logger.warning("tmpfiles.org upload failed: %s", r.text[:80])
+    except Exception as e:
+        logger.warning("tmpfiles.org upload error: %s", e)
+    return None
+
+
+def _upload_gofile(file_path: str) -> Optional[str]:
+    """Upload to gofile.io (anonymous, no expiry stated)."""
+    try:
+        # Get best server first
+        srv = requests.get("https://api.gofile.io/getServer", timeout=10).json()
+        server = srv.get("data", {}).get("server", "store1")
+        with open(file_path, "rb") as f:
+            r = requests.post(f"https://{server}.gofile.io/uploadFile",
+                              files={"file": f}, timeout=30)
+        if r.status_code == 200 and r.json().get("status") == "ok":
+            link = r.json()["data"].get("directLink") or r.json()["data"].get("downloadPage")
+            if link:
+                logger.info("Uploaded to gofile.io: %s", link)
+                return link
+        logger.warning("gofile.io upload failed: %s", r.text[:80])
+    except Exception as e:
+        logger.warning("gofile.io upload error: %s", e)
+    return None
+
+
 def upload_to_catbox(file_path: str) -> Optional[str]:
     """
     Upload a local image to a public host and return a URL SerpAPI can fetch.
-    Tries Catbox.moe first, falls back to Imgur anonymous upload.
+    Tries multiple hosts in order until one succeeds.
     """
-    # Try Catbox first
+    for name, fn in [
+        ("freeimage.host", _upload_freeimage),
+        ("tmpfiles.org",   _upload_tmpfiles),
+        ("Imgur",          _upload_imgur),
+        ("gofile.io",      _upload_gofile),
+    ]:
+        url = fn(file_path)
+        if url:
+            return url
+        logger.info("%s failed — trying next host", name)
+
+    # Last resort: Catbox (frequently rejects anonymous uploads)
     try:
         with open(file_path, "rb") as f:
-            r = requests.post(
-                "https://catbox.moe/user/api.php",
-                data={"reqtype": "fileupload"},
-                files={"fileToUpload": f},
-                timeout=30,
-            )
+            r = requests.post("https://catbox.moe/user/api.php",
+                              data={"reqtype": "fileupload"},
+                              files={"fileToUpload": f}, timeout=30)
         if r.status_code == 200 and r.text.startswith("https://"):
-            url = r.text.strip()
-            logger.info("Uploaded to Catbox: %s", url)
-            return url
-        logger.warning("Catbox upload failed (%s %s) — trying Imgur", r.status_code, r.text[:60])
+            logger.info("Uploaded to Catbox: %s", r.text.strip())
+            return r.text.strip()
     except Exception as e:
-        logger.warning("Catbox upload error: %s — trying Imgur", e)
+        logger.warning("Catbox upload error: %s", e)
 
-    return _upload_imgur(file_path)
+    logger.error("All upload hosts failed for %s", file_path)
+    return None
 
 
 # ── Video keyframe extraction ─────────────────────────────────────────────────

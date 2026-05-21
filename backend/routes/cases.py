@@ -268,7 +268,12 @@ def _run_media_pipeline(case_id: str, manager: CaseManager):
         manager.save(case)
         return
 
-    file_path = str(media_files[0])
+    raw_file = media_files[0]
+    file_path = str(raw_file)
+
+    # For video files: extract keyframes and investigate each one
+    VIDEO_EXTS = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.3gp'}
+    is_video = raw_file.suffix.lower() in VIDEO_EXTS
 
     # Extract source_url from notes field (stored as "source_url:URL\n...")
     source_url = None
@@ -277,6 +282,20 @@ def _run_media_pipeline(case_id: str, manager: CaseManager):
         source_url = lines[0][len("source_url:"):].strip()
 
     try:
+        # For videos: extract keyframes first, then investigate the best one
+        if is_video:
+            step_start("reverse_search", "Extracting keyframes from video…")
+            from backend.modules.reverse_search import extract_keyframes
+            kf_dir = str(case_dir / "keyframes" / raw_file.stem)
+            frames = extract_keyframes(file_path, kf_dir, n_frames=6)
+            if not frames:
+                case.errors.append("Could not extract keyframes — is ffmpeg installed?")
+                case.status = CaseStatus.FAILED
+                manager.save(case)
+                return
+            # Use the middle frame as representative (usually most informative)
+            file_path = frames[len(frames) // 2]
+
         # Step 1: Reverse search + proactive known-account check
         anthropic_key = config.get("anthropic_api_key", "")
         step_start("reverse_search",

@@ -171,6 +171,9 @@ class Case(BaseModel):
     # Auto-action results (keyed by action_id)
     auto_actions: Dict[str, Any] = {}
 
+    # LLM intelligence summary (populated for both URL and media investigations)
+    post_intelligence: Optional[Dict[str, Any]] = None
+
     # Media-first investigation results
     discovered_accounts: List[Dict[str, Any]] = []
     media_investigation: Optional[Dict[str, Any]] = None

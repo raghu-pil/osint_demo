@@ -610,12 +610,88 @@ function renderGuidance(c) {
   return html;
 }
 
+function renderIntelligence(intel) {
+  if (!intel) return '';
+  if (!intel.success) {
+    return `<div class="card" style="border-color:var(--border)">
+      <div class="card-title">Intelligence Summary</div>
+      <div style="font-size:12px;color:var(--text2)">${escHtml(intel.error || 'Analysis unavailable')}</div>
+    </div>`;
+  }
+
+  const assessColor = {
+    authentic: 'var(--low)', needs_verification: 'var(--medium)',
+    likely_disinformation: 'var(--critical)', unclear: 'var(--text2)'
+  }[intel.assessment] || 'var(--text2)';
+
+  const assessLabel = {
+    authentic: '✓ Likely Authentic', needs_verification: '⚠ Needs Verification',
+    likely_disinformation: '⛔ Likely Disinformation', unclear: '? Unclear'
+  }[intel.assessment] || intel.assessment;
+
+  let html = `<div class="card" style="border-left:3px solid ${assessColor}">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div class="card-title" style="margin:0">Intelligence Summary</div>
+      <span style="font-size:12px;font-weight:600;color:${assessColor}">${escHtml(assessLabel)}</span>
+    </div>`;
+
+  if (intel.summary) html += `<div style="font-size:13px;line-height:1.6;margin-bottom:12px">${escHtml(intel.summary)}</div>`;
+  if (intel.assessment_reason) html += `<div style="font-size:12px;color:var(--text2);margin-bottom:12px;font-style:italic">${escHtml(intel.assessment_reason)}</div>`;
+
+  if (intel.claims?.length) {
+    html += `<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">Claims made</div>`;
+    intel.claims.forEach(c => {
+      html += `<div style="font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)">${escHtml(c)}</div>`;
+    });
+    html += '</div>';
+  }
+
+  const ents = intel.entities || {};
+  const entRows = [['People', ents.people], ['Organisations', ents.organisations], ['Locations', ents.locations], ['Events', ents.events]].filter(([,v])=>v?.length);
+  if (entRows.length) {
+    html += `<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">Key entities</div><div class="kv">`;
+    entRows.forEach(([label, vals]) => {
+      html += `<span class="kv-key">${escHtml(label)}</span><span class="kv-val">${vals.map(v=>escHtml(v)).join(', ')}</span>`;
+    });
+    html += '</div></div>';
+  }
+
+  if (intel.red_flags?.length) {
+    html += `<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:600;color:var(--critical);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">Red flags</div>`;
+    intel.red_flags.forEach(f => {
+      html += `<div style="font-size:12px;color:var(--critical);padding:3px 0">• ${escHtml(f)}</div>`;
+    });
+    html += '</div>';
+  }
+
+  if (intel.credibility_signals?.length) {
+    html += `<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:600;color:var(--low);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">Credibility signals</div>`;
+    intel.credibility_signals.forEach(s => {
+      html += `<div style="font-size:12px;color:var(--low);padding:3px 0">• ${escHtml(s)}</div>`;
+    });
+    html += '</div>';
+  }
+
+  if (intel.verification_queries?.length) {
+    html += `<div><div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Verify with</div>
+      <div style="display:flex;flex-wrap:wrap;gap:5px">`;
+    intel.verification_queries.forEach(q => {
+      const url = `https://www.google.com/search?q=${encodeURIComponent(q)}`;
+      html += `<a href="${escHtml(url)}" target="_blank" class="media-link" style="font-size:11px" title="${escHtml(q)}">${escHtml(q.slice(0,50))}${q.length>50?'…':''} ↗</a>`;
+    });
+    html += '</div></div>';
+  }
+
+  html += '</div>';
+  return html;
+}
+
 function renderPost(c) {
   const p = c.post;
   if (!p) return `<div style="color:var(--text2);padding:20px">No post data available. ${c.errors?.length?'Check errors in the Leads tab.':''}</div>`;
 
   const eng = p.engagement || {};
-  return `
+  return `${renderIntelligence(c.post_intelligence)}
     <div class="card">
       <div class="card-title">Post Content</div>
       ${p.text ? `<div style="font-size:14px;line-height:1.6;margin-bottom:14px;padding:12px;background:var(--bg);border-radius:4px">${escHtml(p.text)}</div>` : ''}
@@ -1911,7 +1987,7 @@ function renderDiscoveredAccounts(c) {
   const ctx = inv.context_search;
   if (llm?.success) {
     html += `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:16px">
-      <div style="font-size:13px;font-weight:600;color:var(--accent2);margin-bottom:10px">🤖 Claude Image Analysis</div>`;
+      <div style="font-size:13px;font-weight:600;color:var(--accent2);margin-bottom:10px">Visual Intelligence</div>`;
 
     if (llm.person)  html += `<div style="display:flex;gap:8px;margin-bottom:6px;font-size:12px"><span style="color:var(--text2);min-width:80px;flex-shrink:0">Person</span><span style="color:var(--text)">${escHtml(llm.person)}</span></div>`;
     if (llm.event)   html += `<div style="display:flex;gap:8px;margin-bottom:6px;font-size:12px"><span style="color:var(--text2);min-width:80px;flex-shrink:0">Event</span><span style="color:var(--text)">${escHtml(llm.event)}</span></div>`;

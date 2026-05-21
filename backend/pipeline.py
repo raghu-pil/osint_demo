@@ -243,6 +243,30 @@ def run_pipeline(case_id: str, manager: CaseManager):
             case.errors.append(f"Account history: {e}")
             manager.step_fail(case, "account_history", str(e))
 
+        # ── Step 3c: Intelligence summary (LLM) ──────────────────────────────
+        anthropic_key = config.get("anthropic_api_key", "")
+        if anthropic_key and case.post:
+            try:
+                from backend.modules.post_analysis import analyze_post
+                _log(case, "Generating intelligence summary from post content…")
+                manager.save(case)
+                intel = analyze_post(
+                    post=case.post,
+                    account=case.account,
+                    account_enrichment=case.account_enrichment,
+                    media_files=case.media_files,
+                    anthropic_api_key=anthropic_key,
+                )
+                case.post_intelligence = intel
+                if intel.get("success"):
+                    assessment = intel.get("assessment", "unclear")
+                    _log(case, f"Intelligence summary complete — assessment: {assessment}")
+                else:
+                    _log(case, f"Intelligence summary unavailable: {intel.get('error','')}", level="warn")
+                manager.save(case)
+            except Exception as e:
+                case.errors.append(f"Intelligence summary: {e}")
+
         # ── Step 4: Cross-posts ───────────────────────────────────────────────
         if not config.get("skip_crossposts"):
             manager.step_start(case, "cross_posts")

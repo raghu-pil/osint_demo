@@ -272,9 +272,12 @@ def _run_media_pipeline(case_id: str, manager: CaseManager):
 
     try:
         # Step 1: Reverse search + proactive known-account check
-        step_start("reverse_search", "Reverse Image Search + Known Account Check")
+        anthropic_key = config.get("anthropic_api_key", "")
+        step_start("reverse_search",
+                   "Image Analysis + Reverse Search" if anthropic_key else "Reverse Image Search + Known Account Check")
         from backend.modules.media_pipeline import run_media_investigation, parse_social_url, scrape_account
-        inv = run_media_investigation(file_path, api_key, max_results=15)
+        inv = run_media_investigation(file_path, api_key, max_results=15,
+                                      anthropic_api_key=anthropic_key)
         proactive = inv.get("proactive_check", {})
         n_proactive = len(proactive.get("confirmed_matches", []))
         case.media_investigation = {
@@ -285,6 +288,8 @@ def _run_media_pipeline(case_id: str, manager: CaseManager):
             "proactive_checked": len(proactive.get("checked", [])),
             "manual_links": proactive.get("manual_links", {}),
             "ocr_keywords": proactive.get("ocr_keywords", []),
+            "llm_analysis": inv.get("llm_analysis"),
+            "context_search": inv.get("context_search"),
         }
         discovered = list(inv.get("discovered_accounts", []))
 

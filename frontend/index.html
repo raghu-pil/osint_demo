@@ -1906,6 +1906,55 @@ function renderDiscoveredAccounts(c) {
     </div>`;
     if (!accounts.length && !sourceUrl) return html;
   }
+  // ── LLM image analysis (Claude) ────────────────────────────────────────────
+  const llm = inv.llm_analysis;
+  const ctx = inv.context_search;
+  if (llm?.success) {
+    html += `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:16px">
+      <div style="font-size:13px;font-weight:600;color:var(--accent2);margin-bottom:10px">🤖 Claude Image Analysis</div>`;
+
+    if (llm.person)  html += `<div style="display:flex;gap:8px;margin-bottom:6px;font-size:12px"><span style="color:var(--text2);min-width:80px;flex-shrink:0">Person</span><span style="color:var(--text)">${escHtml(llm.person)}</span></div>`;
+    if (llm.event)   html += `<div style="display:flex;gap:8px;margin-bottom:6px;font-size:12px"><span style="color:var(--text2);min-width:80px;flex-shrink:0">Event</span><span style="color:var(--text)">${escHtml(llm.event)}</span></div>`;
+    if (llm.setting) html += `<div style="display:flex;gap:8px;margin-bottom:6px;font-size:12px"><span style="color:var(--text2);min-width:80px;flex-shrink:0">Setting</span><span style="color:var(--text)">${escHtml(llm.setting)}</span></div>`;
+    if (llm.media_present?.length) html += `<div style="display:flex;gap:8px;margin-bottom:6px;font-size:12px"><span style="color:var(--text2);min-width:80px;flex-shrink:0">Media</span><span style="color:var(--text)">${llm.media_present.map(m=>escHtml(m)).join(', ')}</span></div>`;
+    if (llm.visible_text?.length)  html += `<div style="display:flex;gap:8px;margin-bottom:6px;font-size:12px"><span style="color:var(--text2);min-width:80px;flex-shrink:0">Text seen</span><span style="color:var(--text)">${llm.visible_text.map(t=>`<code style="background:var(--bg3);padding:1px 5px;border-radius:3px">${escHtml(t)}</code>`).join(' ')}</span></div>`;
+    if (llm.summary) html += `<div style="margin-top:8px;font-size:12px;color:var(--text2);border-top:1px solid var(--border);padding-top:8px">${escHtml(llm.summary)}</div>`;
+
+    // Context search results from Claude's generated queries
+    if (ctx?.success) {
+      const allResults = [...(ctx.google||[]), ...(ctx.youtube||[])];
+      if (allResults.length) {
+        html += `<div style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px">
+          <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:8px">Context search results (${allResults.length} found via Claude's queries)</div>`;
+        for (const r of allResults.slice(0,8)) {
+          const isYT = r.link?.includes('youtube');
+          html += `<div style="margin-bottom:6px;padding:6px 8px;background:var(--bg3);border-radius:4px;font-size:12px">
+            ${isYT ? '<span style="color:var(--critical);font-size:10px;margin-right:4px">▶ YouTube</span>' : ''}
+            <a href="${escHtml(r.link)}" target="_blank" style="color:var(--accent2);font-weight:600">${escHtml(r.title)}</a>
+            ${r.channel ? `<span style="color:var(--text2);font-size:11px"> · ${escHtml(r.channel)}</span>` : ''}
+            ${r.source  ? `<span style="color:var(--text2);font-size:11px"> · ${escHtml(r.source)}</span>` : ''}
+            ${r.snippet ? `<div style="color:var(--text2);font-size:11px;margin-top:2px">${escHtml(r.snippet.slice(0,120))}</div>` : ''}
+          </div>`;
+        }
+        html += '</div>';
+      }
+      // Manual links for remaining queries
+      if (ctx.manual_links?.length) {
+        html += `<div style="margin-top:8px;display:flex;gap:5px;flex-wrap:wrap">`;
+        for (const l of ctx.manual_links) {
+          html += `<a href="${escHtml(l.url)}" target="_blank" class="media-link" style="font-size:10px">${escHtml(l.label)} ↗</a>`;
+        }
+        html += '</div>';
+      }
+    }
+    html += '</div>';
+  } else if (llm && !llm.success) {
+    html += `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:var(--text2)">
+      Image analysis unavailable: ${escHtml(llm.error || 'unknown error')}
+      ${llm.error?.includes('not set') ? ' — add <code>anthropic_api_key</code> to config.yaml' : ''}
+    </div>`;
+  }
+
   // Proactive match banner
   if (inv.proactive_matches > 0) {
     html += `<div style="background:rgba(248,81,73,.1);border:1px solid rgba(248,81,73,.4);border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:13px">

@@ -669,14 +669,17 @@ def run_media_investigation(
     file_path: str,
     api_key: str,
     max_results: int = 15,
+    anthropic_api_key: str = "",
 ) -> Dict[str, Any]:
     """
     Full media-first investigation:
       1. Upload to public host
-      2. Reverse search via SerpAPI (Google Lens + Yandex)
-      3. Parse result URLs for social media accounts
-      4. Scrape each account
-      5. Score and rank by investigative severity
+      2. LLM image analysis (Claude): extract person, event, search queries
+      3. Context-driven Google + YouTube search using LLM-generated queries
+      4. Visual reverse search via SerpAPI (Google Lens + Yandex)
+      5. Parse result URLs for social media accounts
+      6. Scrape each account
+      7. Score and rank by investigative severity
 
     Returns a dict with `discovered_accounts` (ranked list) and raw search data.
     """
@@ -687,6 +690,8 @@ def run_media_investigation(
         "public_url": None,
         "raw_matches": [],
         "discovered_accounts": [],
+        "llm_analysis": None,
+        "context_search": None,
         "errors": [],
     }
 
@@ -698,7 +703,26 @@ def run_media_investigation(
     result["public_url"] = public_url
     logger.info("Uploaded media to %s", public_url)
 
-    # Step 2: reverse search
+    # Step 2: LLM image analysis — extract context and generate search queries
+    if anthropic_api_key:
+        logger.info("Running Claude image analysis…")
+        from backend.modules.image_analysis import analyze_image, run_context_searches
+        analysis = analyze_image(file_path, anthropic_api_key, public_url=public_url)
+        result["llm_analysis"] = analysis
+        if analysis.get("success"):
+            logger.info("Claude identified: %s | %s", analysis.get("person","?"), analysis.get("event","?"))
+            # Step 3: context-driven searches using Claude's generated queries
+            ctx = run_context_searches(analysis, api_key, max_results=5)
+            result["context_search"] = ctx
+            if ctx.get("success"):
+                logger.info("Context search: %d Google + %d YouTube results",
+                            len(ctx.get("google",[])), len(ctx.get("youtube",[])))
+        else:
+            logger.warning("Claude analysis failed: %s", analysis.get("error"))
+    else:
+        logger.info("No anthropic_api_key set — skipping LLM image analysis")
+
+    # Step 4: visual reverse search
     gl_matches = _search_google_lens(api_key, public_url, max_results=max_results)
     yx_matches = _search_yandex(api_key, public_url, max_results=max_results)
     all_matches = gl_matches + yx_matches

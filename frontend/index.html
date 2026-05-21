@@ -6,10 +6,10 @@
 <title>OSINT Investigation Tool</title>
 <style>
 :root {
-  --bg: #0d1117; --bg2: #161b22; --bg3: #21262d;
-  --border: #30363d; --text: #e6edf3; --text2: #8b949e;
-  --accent: #2ea043; --accent2: #1f6feb;
-  --critical: #f85149; --high: #f0883e; --medium: #d29922; --low: #3fb950; --info: #58a6ff;
+  --bg: #ffffff; --bg2: #f0f0f0; --bg3: #e8e8e8;
+  --border: #d8d8d8; --text: #1a1a1a; --text2: #666666;
+  --accent: #2e7d32; --accent2: #1565c0;
+  --critical: #c62828; --high: #e65100; --medium: #f57f17; --low: #2e7d32; --info: #1565c0;
   --badge-h: 24px; --radius: 6px;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -38,8 +38,8 @@ body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; back
 #layout { display: flex; flex: 1; overflow: hidden; }
 
 /* ── Sidebar ── */
-#sidebar { width: 280px; flex-shrink: 0; border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
-#sidebar-header { padding: 12px 14px; font-size: 12px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: .06em; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+#sidebar { width: 280px; flex-shrink: 0; border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; background: var(--bg2); }
+#sidebar-header { padding: 12px 14px; font-size: 12px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: .06em; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; background: var(--bg2); }
 #clear-all { background: none; border: none; color: var(--text2); font-size: 11px; cursor: pointer; }
 #clear-all:hover { color: var(--critical); }
 #case-list { overflow-y: auto; flex: 1; }

@@ -312,6 +312,9 @@ def _run_media_pipeline(case_id: str, manager: CaseManager):
             "ocr_keywords": proactive.get("ocr_keywords", []),
             "llm_analysis": pipeline_result.get("llm_analysis"),
             "context_search": pipeline_result.get("context_search"),
+            "misinfo_articles": pipeline_result.get("misinfo_articles", []),
+            "original_source_results": pipeline_result.get("context_search", {}).get("original_source", []) if pipeline_result.get("context_search") else [],
+            "is_deepfake_claim": pipeline_result.get("llm_analysis", {}).get("is_deepfake_claim", False) if pipeline_result.get("llm_analysis") else False,
         })
         case.media_investigation = saved_inv
         inv = pipeline_result   # alias for the rest of this function

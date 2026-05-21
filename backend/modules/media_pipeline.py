@@ -767,10 +767,12 @@ def run_media_investigation(
                 "post_date": match.get("date", ""),
             }
 
-    # Also parse URLs from Claude's semantic context search (finds accounts by content,
-    # not just visual similarity — catches the same person/event shared under different images)
+    # Also parse URLs from Claude's context searches
     ctx = result.get("context_search") or {}
+    misinfo_articles = []  # non-social fact-check / news articles from misinfo search
+
     if ctx.get("success"):
+        # General semantic results (same person/event)
         for item in ctx.get("google", []) + ctx.get("youtube", []):
             url = item.get("link", "")
             if not url:
@@ -780,7 +782,7 @@ def run_media_investigation(
                 continue
             acct_key = parsed.get("username") or (parsed.get("account_url") or url)[:60]
             key = (parsed["platform"], acct_key)
-            if key not in seen_accounts:  # visual match takes priority if already found
+            if key not in seen_accounts:
                 seen_accounts[key] = {
                     **parsed,
                     "match_engine": "semantic_search",
@@ -789,7 +791,42 @@ def run_media_investigation(
                     "post_date": item.get("published", ""),
                     "_search_query": item.get("query", ""),
                 }
-        logger.info("After semantic search: %d total account candidates", len(seen_accounts))
+
+        # Misinformation-focused results (debunks, fact-checks, fake/deepfake reports)
+        for item in ctx.get("misinfo", []):
+            url = item.get("link", "")
+            if not url:
+                continue
+            parsed = parse_social_url(url)
+            if parsed:
+                acct_key = parsed.get("username") or (parsed.get("account_url") or url)[:60]
+                key = (parsed["platform"], acct_key)
+                if key not in seen_accounts:
+                    seen_accounts[key] = {
+                        **parsed,
+                        "match_engine": "misinfo_search",
+                        "match_title": item.get("title", ""),
+                        "source_domain": item.get("source", ""),
+                        "post_date": item.get("published", ""),
+                        "_search_query": item.get("query", ""),
+                    }
+                else:
+                    # Upgrade match_engine if already found another way
+                    seen_accounts[key]["match_engine"] = "misinfo_search"
+            else:
+                # Non-social URL (news site, fact-checker) — store as article
+                misinfo_articles.append({
+                    "title": item.get("title", ""),
+                    "url": url,
+                    "source": item.get("source", ""),
+                    "snippet": item.get("snippet", ""),
+                    "query": item.get("query", ""),
+                })
+
+        logger.info("After context search: %d account candidates, %d misinfo articles",
+                    len(seen_accounts), len(misinfo_articles))
+
+    result["misinfo_articles"] = misinfo_articles
 
     # Step 4: scrape each social media account (skip generic web)
     accounts = []
@@ -814,6 +851,10 @@ def run_media_investigation(
     )
     for a in accounts:
         score_account(a, accounts, earliest_date)
+        # Accounts found via misinfo search are talking about authenticity — boost priority
+        if a.get("match_engine") == "misinfo_search":
+            a["severity_score"] = min(100, a.get("severity_score", 0) + 15)
+            a.setdefault("score_reasons", []).append("found in misinformation search results")
         # Boost/flag known misinformation/factcheck accounts
         try:
             from backend.modules.known_accounts import apply_known_account_scoring
@@ -821,7 +862,12 @@ def run_media_investigation(
         except Exception:
             pass
 
-    accounts.sort(key=lambda a: (-a.get("severity_score", 0), a.get("platform", "")))
+    # Sort: misinfo_search first, then by score descending
+    accounts.sort(key=lambda a: (
+        0 if a.get("match_engine") == "misinfo_search" else 1,
+        -a.get("severity_score", 0),
+        a.get("platform", "")
+    ))
     for i, a in enumerate(accounts):
         a["rank"] = i + 1
 

@@ -312,7 +312,9 @@ def enrich_account(account_data: dict, platform: str) -> dict:
     enriched = dict(account_data)
     username = account_data.get("username", "")
     bio = account_data.get("bio", "") or ""
-    website = account_data.get("website", "") or ""
+    website = account_data.get("website") or ""
+    if not isinstance(website, str):
+        website = ""
 
     # ── vxtwitter profile enrichment (real name, location, creation date) ──
     if platform == "twitter" and username:

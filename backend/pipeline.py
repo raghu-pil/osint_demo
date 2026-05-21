@@ -367,6 +367,93 @@ def run_pipeline(case_id: str, manager: CaseManager):
         else:
             manager.step_skip(case, "media", "Disabled in config")
 
+        # ── Step 7b: Combined image + content analysis (LLM) ────────────────
+        if anthropic_key and case.media_files:
+            img_file = next(
+                (mf for mf in case.media_files if mf.media_type in ("image", "video")), None
+            )
+            if img_file:
+                try:
+                    from backend.modules.image_analysis import analyze_image, run_context_searches
+                    from pathlib import Path as _P
+
+                    _log(case, "Running visual + content analysis (image + post context → Claude)…")
+                    manager.save(case)
+
+                    # For video: use first extracted keyframe (extract it now if not yet done)
+                    img_path = img_file.local_path
+                    if img_file.media_type == "video":
+                        kf_dir = case_dir / "keyframes" / _P(img_file.filename).stem
+                        kf_dir.mkdir(parents=True, exist_ok=True)
+                        kf_path = kf_dir / "kf_000.jpg"
+                        if not kf_path.exists():
+                            import subprocess as _sp
+                            _sp.run(
+                                ["ffmpeg", "-ss", "1", "-i", str(img_file.local_path),
+                                 "-frames:v", "1", "-q:v", "2", str(kf_path), "-y"],
+                                capture_output=True, timeout=20
+                            )
+                        if kf_path.exists():
+                            img_path = str(kf_path)
+                        else:
+                            _log(case, "Could not extract keyframe — skipping image analysis", level="warn")
+                            raise ValueError("No keyframe available")
+
+                    # For Claude analysis we use base64 directly (more reliable than
+                    # depending on a third-party host URL being accessible to Claude)
+                    pub_url = None
+
+                    # Build post context from scraped data
+                    post = case.post or {}
+                    acct = case.account or {}
+                    def _str(v):
+                        return str(v) if v is not None else ""
+
+                    post_ctx = {
+                        "platform":     case.platform or "",
+                        "username":     _str(acct.get("username") or post.get("username", "")),
+                        "display_name": _str(acct.get("display_name", "")),
+                        "bio":          _str(acct.get("bio", "")),
+                        "followers":    acct.get("followers"),
+                        "post_text":    _str(post.get("text", "")),
+                        "post_date":    _str(post.get("created_at", "")),
+                        "post_url":     case.url,
+                    }
+
+                    analysis = analyze_image(img_path, anthropic_key,
+                                             public_url=pub_url, post_context=post_ctx)
+
+                    if analysis.get("success"):
+                        # Merge into existing post_intelligence or store separately
+                        existing = case.post_intelligence or {}
+                        existing["image_analysis"] = analysis
+                        existing["image_context_match"] = analysis.get("context_match", "")
+                        case.post_intelligence = existing
+
+                        # Run context + misinfo searches
+                        serpapi_key = config.get("serpapi_api_key", "")
+                        if serpapi_key:
+                            ctx = run_context_searches(analysis, serpapi_key, max_results=5)
+                            existing["context_search"] = ctx
+                            existing["misinfo_articles"] = [
+                                {"title": r.get("title",""), "url": r.get("link",""),
+                                 "source": r.get("source",""), "snippet": r.get("snippet",""),
+                                 "query": r.get("query","")}
+                                for r in ctx.get("misinfo", [])
+                            ]
+                            existing["original_source_results"] = ctx.get("original_source", [])
+                            existing["is_deepfake_claim"] = analysis.get("is_deepfake_claim", False)
+                            existing["deepfake_visual_context"] = analysis.get("deepfake_visual_context", "")
+                            case.post_intelligence = existing
+                            _log(case, f"Image analysis complete — context match: {analysis.get('context_match','N/A')[:60]}")
+                        else:
+                            _log(case, "Image analysis complete (no SerpAPI key — skipping context search)")
+                    else:
+                        _log(case, f"Image analysis skipped: {analysis.get('error','')}", level="warn")
+                    manager.save(case)
+                except Exception as e:
+                    _log(case, f"Image+content analysis error: {e}", level="warn")
+
         # ── Step 8: Identity pivots ───────────────────────────────────────────
         manager.step_start(case, "identity")
         _log(case, "Correlating any emails, phone numbers, or handles found in the profile…")

@@ -801,7 +801,89 @@ function renderGuidance(c) {
     </div>`;
   }
 
-  // Known accounts check — always appended to Leads for both URL and media cases
+  // ── Intelligence section (always shown at bottom of Leads) ──────────────────
+
+  // Collect data from wherever it lives (URL cases: post_intelligence; upload cases: media_investigation)
+  const _pi  = c.post_intelligence || {};
+  const _inv = c.media_investigation || {};
+
+  const _isDeepfake    = _pi.is_deepfake_claim || _inv.is_deepfake_claim || false;
+  const _visualCtx     = _pi.deepfake_visual_context || _inv.deepfake_visual_context || '';
+  const _origResults   = (_pi.original_source_results || _inv.original_source_results || []);
+  const _misinoArticles = [...(_pi.misinfo_articles || []), ...(_inv.misinfo_articles || [])];
+  const _ctxSearch     = _pi.context_search || _inv.context_search;
+  const _imgAnalysis   = _pi.image_analysis || (_pi.success ? _pi : null);
+
+  // 1. Deepfake / original source (highest priority — shown first)
+  if (_isDeepfake || _origResults.length) {
+    html += `<div class="card" style="border-left:3px solid var(--high);margin-bottom:14px">
+      <div class="card-title" style="color:var(--high)">🎭 Deepfake / Lipsync — Original Source Search</div>`;
+    if (_visualCtx) {
+      html += `<div style="background:rgba(230,81,0,.08);border:1px solid rgba(230,81,0,.2);border-radius:4px;padding:8px 10px;font-size:12px;margin-bottom:10px">
+        <strong style="color:var(--high)">Visual fingerprint (search for these characteristics to find the original):</strong><br>
+        <span style="color:var(--text)">${escHtml(_visualCtx)}</span>
+      </div>`;
+    }
+    if (_origResults.length) {
+      html += `<div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px">Possible original footage found (${_origResults.length}):</div>`;
+      for (const r of _origResults.slice(0, 8)) {
+        const isYT = r.link?.includes('youtube') || r.source_type === 'youtube';
+        html += `<div style="margin-bottom:6px;padding:7px 10px;background:rgba(230,81,0,.05);border:1px solid rgba(230,81,0,.2);border-radius:4px;font-size:12px">
+          ${isYT ? '<span style="font-size:10px;font-weight:700;background:rgba(198,40,40,.15);color:var(--critical);padding:1px 5px;border-radius:3px;margin-right:5px">▶ YT</span>' : ''}
+          <a href="${escHtml(r.link)}" target="_blank" style="color:var(--high);font-weight:600">${escHtml(r.title)}</a>
+          ${r.channel ? `<span style="color:var(--text2);font-size:11px"> · ${escHtml(r.channel)}</span>` : ''}
+          ${r.source  ? `<span style="color:var(--text2);font-size:11px"> · ${escHtml(r.source)}</span>` : ''}
+          ${r.published ? `<span style="color:var(--text2);font-size:10px"> · ${escHtml(r.published)}</span>` : ''}
+          ${r.snippet ? `<div style="color:var(--text2);font-size:11px;margin-top:2px">${escHtml(r.snippet.slice(0,140))}</div>` : ''}
+        </div>`;
+      }
+    } else {
+      html += `<div style="font-size:12px;color:var(--text2)">No original footage found automatically. Use the visual fingerprint above to search YouTube manually.</div>`;
+    }
+    // Manual search links for original source
+    const _osLinks = (_ctxSearch?.manual_links || []).filter(l => l.label?.startsWith('Find original'));
+    if (_osLinks.length) {
+      html += `<div style="margin-top:8px;display:flex;gap:5px;flex-wrap:wrap">`;
+      for (const l of _osLinks) html += `<a href="${escHtml(l.url)}" target="_blank" class="media-link" style="font-size:10px">${escHtml(l.label)} ↗</a>`;
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+
+  // 2. Claude image analysis summary (context match)
+  if (_imgAnalysis?.success) {
+    const match = _pi.image_context_match || _imgAnalysis.context_match || '';
+    const matchColor = match.startsWith('DOES NOT MATCH') ? 'var(--critical)'
+      : match.startsWith('MATCHES') ? 'var(--low)' : 'var(--medium)';
+    html += `<div class="card" style="margin-bottom:14px">
+      <div class="card-title">Visual Intelligence (Image + Post Analysis)</div>`;
+    if (match) {
+      html += `<div style="background:${matchColor}18;border:1px solid ${matchColor}44;border-radius:4px;padding:8px 12px;margin-bottom:8px;font-size:12px">
+        <strong style="color:${matchColor}">Context check:</strong> ${escHtml(match)}
+      </div>`;
+    }
+    if (_imgAnalysis.person)  html += `<div style="font-size:12px;margin-bottom:4px"><span style="color:var(--text2);min-width:80px;display:inline-block">Person</span>${escHtml(_imgAnalysis.person)}</div>`;
+    if (_imgAnalysis.event)   html += `<div style="font-size:12px;margin-bottom:4px"><span style="color:var(--text2);min-width:80px;display:inline-block">Event</span>${escHtml(_imgAnalysis.event)}</div>`;
+    if (_imgAnalysis.setting) html += `<div style="font-size:12px;margin-bottom:4px"><span style="color:var(--text2);min-width:80px;display:inline-block">Setting</span>${escHtml(_imgAnalysis.setting)}</div>`;
+    if (_imgAnalysis.summary) html += `<div style="font-size:12px;color:var(--text2);margin-top:6px;border-top:1px solid var(--border);padding-top:6px">${escHtml(_imgAnalysis.summary)}</div>`;
+    html += '</div>';
+  }
+
+  // 3. Misinformation / fact-check results
+  if (_misinoArticles.length) {
+    html += `<div class="card" style="border-left:3px solid var(--critical);margin-bottom:14px">
+      <div class="card-title" style="color:var(--critical)">🚨 Misinformation / Fact-check results (${_misinoArticles.length})</div>`;
+    for (const a of _misinoArticles.slice(0, 8)) {
+      html += `<div style="margin-bottom:6px;padding:6px 10px;background:rgba(198,40,40,.05);border:1px solid rgba(198,40,40,.2);border-radius:4px;font-size:12px">
+        <a href="${escHtml(a.url)}" target="_blank" style="color:var(--critical);font-weight:600">${escHtml(a.title)}</a>
+        ${a.source ? `<span style="color:var(--text2);font-size:11px"> · ${escHtml(a.source)}</span>` : ''}
+        ${a.snippet ? `<div style="color:var(--text2);font-size:11px;margin-top:2px">${escHtml(a.snippet.slice(0,140))}</div>` : ''}
+      </div>`;
+    }
+    html += '</div>';
+  }
+
+  // 4. Known accounts check
   const _pubUrl = c.media_investigation?.public_url
     || Object.values(c.auto_actions||{}).find(v=>v.serpapi_results?.public_url)?.serpapi_results?.public_url
     || _reverseSearchResults[c.id]?.public_url
@@ -887,12 +969,102 @@ function renderIntelligence(intel) {
   return html;
 }
 
+function renderImageAnalysisCard(c) {
+  const intel = c.post_intelligence;
+  if (!intel) return '';
+  const img = intel.image_analysis;
+  if (!img?.success) return '';
+
+  const ctx = intel.context_search;
+  const misinfo = intel.misinfo_articles || [];
+  const match = intel.image_context_match || img.context_match || '';
+
+  const matchColor = match.startsWith('DOES NOT MATCH') ? 'var(--critical)'
+    : match.startsWith('MATCHES') ? 'var(--low)' : 'var(--medium)';
+
+  let html = `<div class="card" style="margin-bottom:12px;border-left:3px solid ${matchColor}">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+      <div class="card-title" style="margin:0">Visual + Content Analysis</div>
+      <span style="font-size:11px;color:var(--text2)">Image analysed alongside post text</span>
+    </div>`;
+
+  if (match) {
+    html += `<div style="background:${matchColor}18;border:1px solid ${matchColor}44;border-radius:4px;padding:8px 12px;margin-bottom:10px;font-size:12px">
+      <strong style="color:${matchColor}">Context check:</strong> ${escHtml(match)}
+    </div>`;
+  }
+
+  if (img.person)  html += `<div style="display:flex;gap:8px;margin-bottom:5px;font-size:12px"><span style="color:var(--text2);min-width:80px;flex-shrink:0">Person</span><span>${escHtml(img.person)}</span></div>`;
+  if (img.event)   html += `<div style="display:flex;gap:8px;margin-bottom:5px;font-size:12px"><span style="color:var(--text2);min-width:80px;flex-shrink:0">Event</span><span>${escHtml(img.event)}</span></div>`;
+  if (img.setting) html += `<div style="display:flex;gap:8px;margin-bottom:5px;font-size:12px"><span style="color:var(--text2);min-width:80px;flex-shrink:0">Setting</span><span>${escHtml(img.setting)}</span></div>`;
+  if (img.visible_text?.length) html += `<div style="display:flex;gap:8px;margin-bottom:5px;font-size:12px"><span style="color:var(--text2);min-width:80px;flex-shrink:0">Text seen</span><span>${img.visible_text.map(t=>`<code style="background:var(--bg3);padding:1px 5px;border-radius:3px">${escHtml(t)}</code>`).join(' ')}</span></div>`;
+  if (img.summary) html += `<div style="font-size:12px;color:var(--text2);margin-top:8px;border-top:1px solid var(--border);padding-top:8px">${escHtml(img.summary)}</div>`;
+
+  // Deepfake / original source section
+  const origResults = intel.original_source_results || [];
+  const isDeepfake = intel.is_deepfake_claim || img.is_deepfake_claim;
+  const visualCtx = intel.deepfake_visual_context || img.deepfake_visual_context || '';
+  if (isDeepfake || origResults.length) {
+    html += `<div style="margin-top:12px;border-top:2px solid var(--high);padding-top:10px">
+      <div style="font-size:12px;font-weight:700;color:var(--high);margin-bottom:6px">🎭 Deepfake / Lipsync Detected — Original Source Search</div>`;
+    if (visualCtx) {
+      html += `<div style="background:rgba(230,81,0,.08);border:1px solid rgba(230,81,0,.25);border-radius:4px;padding:8px 10px;font-size:12px;margin-bottom:8px">
+        <strong style="color:var(--high)">Visual fingerprint for finding original:</strong><br>
+        <span style="color:var(--text2)">${escHtml(visualCtx)}</span>
+      </div>`;
+    }
+    if (origResults.length) {
+      html += `<div style="font-size:11px;color:var(--text2);margin-bottom:6px">Possible original footage (${origResults.length} results):</div>`;
+      for (const r of origResults.slice(0, 8)) {
+        const isYT = r.link?.includes('youtube') || r.source_type === 'youtube';
+        html += `<div style="margin-bottom:6px;padding:6px 10px;background:rgba(230,81,0,.05);border:1px solid rgba(230,81,0,.2);border-radius:4px;font-size:12px">
+          ${isYT ? '<span style="color:var(--critical);font-size:10px;font-weight:700;margin-right:4px">▶ YouTube</span>' : ''}
+          <a href="${escHtml(r.link)}" target="_blank" style="color:var(--high);font-weight:600">${escHtml(r.title)}</a>
+          ${r.channel ? `<span style="color:var(--text2);font-size:11px"> · ${escHtml(r.channel)}</span>` : ''}
+          ${r.source  ? `<span style="color:var(--text2);font-size:11px"> · ${escHtml(r.source)}</span>` : ''}
+          ${r.published ? `<span style="color:var(--text2);font-size:10px"> · ${escHtml(r.published)}</span>` : ''}
+          ${r.snippet ? `<div style="color:var(--text2);font-size:11px;margin-top:2px">${escHtml(r.snippet.slice(0,140))}</div>` : ''}
+        </div>`;
+      }
+    } else {
+      html += `<div style="font-size:12px;color:var(--text2)">No original footage found automatically — use the manual search links below to search YouTube and news archives using the visual fingerprint above.</div>`;
+    }
+    html += '</div>';
+  }
+
+  // Misinfo articles
+  if (misinfo.length) {
+    html += `<div style="margin-top:12px;border-top:2px solid var(--critical);padding-top:10px">
+      <div style="font-size:12px;font-weight:700;color:var(--critical);margin-bottom:8px">🚨 Misinformation / fact-check results (${misinfo.length})</div>`;
+    for (const a of misinfo.slice(0, 6)) {
+      html += `<div style="margin-bottom:6px;padding:6px 10px;background:rgba(198,40,40,.06);border:1px solid rgba(198,40,40,.2);border-radius:4px;font-size:12px">
+        <a href="${escHtml(a.url)}" target="_blank" style="color:var(--critical);font-weight:600">${escHtml(a.title)}</a>
+        ${a.source ? `<span style="color:var(--text2);font-size:11px"> · ${escHtml(a.source)}</span>` : ''}
+        ${a.snippet ? `<div style="color:var(--text2);font-size:11px;margin-top:2px">${escHtml(a.snippet.slice(0,140))}</div>` : ''}
+      </div>`;
+    }
+    html += '</div>';
+  }
+
+  // Context search links
+  if (ctx?.manual_links?.length) {
+    html += `<div style="margin-top:10px;border-top:1px solid var(--border);padding-top:8px;display:flex;gap:5px;flex-wrap:wrap">`;
+    for (const l of ctx.manual_links) {
+      html += `<a href="${escHtml(l.url)}" target="_blank" class="media-link" style="font-size:10px">${escHtml(l.label)} ↗</a>`;
+    }
+    html += '</div>';
+  }
+
+  html += '</div>';
+  return html;
+}
+
 function renderPost(c) {
   const p = c.post;
   if (!p) return `<div style="color:var(--text2);padding:20px">No post data available. ${c.errors?.length?'Check errors in the Leads tab.':''}</div>`;
 
   const eng = p.engagement || {};
-  return `${renderIntelligence(c.post_intelligence)}
+  return `${renderImageAnalysisCard(c)}${renderIntelligence(c.post_intelligence)}
     <div class="card">
       <div class="card-title">Post Content</div>
       ${p.text ? `<div style="font-size:14px;line-height:1.6;margin-bottom:14px;padding:12px;background:var(--bg);border-radius:4px">${escHtml(p.text)}</div>` : ''}
@@ -2320,13 +2492,27 @@ function renderDiscoveredAccounts(c) {
     if (llm.visible_text?.length)  html += `<div style="display:flex;gap:8px;margin-bottom:6px;font-size:12px"><span style="color:var(--text2);min-width:80px;flex-shrink:0">Text seen</span><span style="color:var(--text)">${llm.visible_text.map(t=>`<code style="background:var(--bg3);padding:1px 5px;border-radius:3px">${escHtml(t)}</code>`).join(' ')}</span></div>`;
     if (llm.summary) html += `<div style="margin-top:8px;font-size:12px;color:var(--text2);border-top:1px solid var(--border);padding-top:8px">${escHtml(llm.summary)}</div>`;
 
-    // Context search results from Claude's generated queries
+    // Misinformation search results — shown BEFORE general results
+    if (ctx?.success && ctx.misinfo?.length) {
+      html += `<div style="margin-top:12px;border-top:2px solid var(--critical);padding-top:10px">
+        <div style="font-size:12px;font-weight:700;color:var(--critical);margin-bottom:8px">🚨 Misinformation / Fact-check results (${ctx.misinfo.length} found)</div>`;
+      for (const r of ctx.misinfo.slice(0, 8)) {
+        html += `<div style="margin-bottom:6px;padding:7px 10px;background:rgba(248,81,73,.05);border:1px solid rgba(248,81,73,.2);border-radius:4px;font-size:12px">
+          <a href="${escHtml(r.link)}" target="_blank" style="color:var(--critical);font-weight:600">${escHtml(r.title)}</a>
+          ${r.source ? `<span style="color:var(--text2);font-size:11px"> · ${escHtml(r.source)}</span>` : ''}
+          ${r.snippet ? `<div style="color:var(--text2);font-size:11px;margin-top:2px">${escHtml(r.snippet.slice(0,140))}</div>` : ''}
+        </div>`;
+      }
+      html += '</div>';
+    }
+
+    // General context search results
     if (ctx?.success) {
       const allResults = [...(ctx.google||[]), ...(ctx.youtube||[])];
       if (allResults.length) {
-        html += `<div style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px">
-          <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:8px">Context search results (${allResults.length} found via Claude's queries)</div>`;
-        for (const r of allResults.slice(0,8)) {
+        html += `<div style="margin-top:10px;border-top:1px solid var(--border);padding-top:10px">
+          <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:8px">Context search results</div>`;
+        for (const r of allResults.slice(0, 6)) {
           const isYT = r.link?.includes('youtube');
           html += `<div style="margin-bottom:6px;padding:6px 8px;background:var(--bg3);border-radius:4px;font-size:12px">
             ${isYT ? '<span style="color:var(--critical);font-size:10px;margin-right:4px">▶ YouTube</span>' : ''}
@@ -2338,7 +2524,6 @@ function renderDiscoveredAccounts(c) {
         }
         html += '</div>';
       }
-      // Manual links for remaining queries
       if (ctx.manual_links?.length) {
         html += `<div style="margin-top:8px;display:flex;gap:5px;flex-wrap:wrap">`;
         for (const l of ctx.manual_links) {
@@ -2366,10 +2551,11 @@ function renderDiscoveredAccounts(c) {
     </div>`;
   }
 
+  const misifoAccounts = accounts.filter(a => a.match_engine === 'misinfo_search').length;
   html += `<div style="margin-bottom:16px;font-size:13px;color:var(--text2)">
-    Found <strong style="color:var(--text)">${accounts.length} account(s)</strong> sharing this content
-    via reverse image search (${inv.raw_match_count||0} visual matches + ${inv.proactive_checked||0} known accounts proactively checked).
-    Ranked by investigative priority.
+    Found <strong style="color:var(--text)">${accounts.length} account(s)</strong> —
+    ${inv.raw_match_count||0} visual · ${misifoAccounts} misinfo discussion · ${inv.proactive_checked||0} proactive checks.
+    Misinformation search results listed first.
   </div>`;
 
   // Summary bar

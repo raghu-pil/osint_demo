@@ -238,14 +238,36 @@ def _search_yandex(api_key: str, image_url: str, max_results: int = 10) -> List[
             "api_key": api_key,
         }).get_dict()
 
+        def _yandex_thumb(item):
+            """
+            Extract a usable thumbnail URL from a Yandex result item.
+            SerpAPI sometimes returns thumbnail as a dict {url, width, height}
+            rather than a plain string — handle both forms.
+            """
+            def _extract(val):
+                if isinstance(val, str) and val.startswith("http"):
+                    return val
+                if isinstance(val, dict):
+                    return val.get("url") or val.get("src") or val.get("link") or ""
+                return ""
+
+            for key in ("thumbnail", "original", "image", "preview", "url", "image_url"):
+                url = _extract(item.get(key))
+                if url:
+                    return url
+
+            logger.info("Yandex item has no thumbnail — fields: %s",
+                        {k: str(v)[:80] for k, v in item.items()})
+            return ""
+
         # Yandex returns similar_images
         for item in results.get("similar_images", [])[:max_results]:
             matches.append({
                 "engine": "yandex",
                 "title": item.get("title", "Yandex match"),
                 "link": item.get("link", "") or item.get("source", ""),
-                "source": item.get("source", "") or item.get("domain", ""),
-                "thumbnail": item.get("thumbnail", "") or item.get("original", ""),
+                "source": item.get("source", "") or item.get("domain", "") or item.get("website", ""),
+                "thumbnail": _yandex_thumb(item),
                 "snippet": item.get("snippet", ""),
             })
 
@@ -255,8 +277,8 @@ def _search_yandex(api_key: str, image_url: str, max_results: int = 10) -> List[
                 "engine": "yandex",
                 "title": item.get("title", ""),
                 "link": item.get("link", ""),
-                "source": item.get("source", ""),
-                "thumbnail": item.get("thumbnail", ""),
+                "source": item.get("source", "") or item.get("domain", ""),
+                "thumbnail": _yandex_thumb(item),
             })
     except Exception as e:
         logger.warning("Yandex search failed: %s", e)

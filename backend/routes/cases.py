@@ -24,7 +24,7 @@ def get_manager() -> CaseManager:
 @router.post("/cases", response_model=Case, status_code=201)
 async def create_case(req: InvestigateRequest, background_tasks: BackgroundTasks):
     manager = get_manager()
-    case = manager.create(req.url, req.notes, req.name)
+    case = manager.create(req.url, req.notes, req.name, req.parent_id, req.parent_label)
     background_tasks.add_task(run_pipeline, case.id, manager)
     return case
 
@@ -60,6 +60,28 @@ async def get_report(case_id: str):
     report_path = Path(_CASES_DIR) / case_id / "case.json"
     return FileResponse(report_path, media_type="application/json",
                         filename=f"osint_case_{case_id}.json")
+
+
+@router.get("/proxy-image")
+async def proxy_image(url: str):
+    """Proxy an external image through the server to avoid CORS/hotlink blocks."""
+    from fastapi.responses import Response
+    import urllib.request
+    if not url.startswith("http"):
+        raise HTTPException(400, "Invalid URL")
+    try:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "https://yandex.com/",
+            "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
+        })
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = resp.read()
+            ct = resp.headers.get("Content-Type", "image/jpeg")
+        return Response(content=data, media_type=ct,
+                        headers={"Cache-Control": "public, max-age=3600"})
+    except Exception as e:
+        raise HTTPException(502, f"Could not fetch image: {e}")
 
 
 @router.get("/cases/{case_id}/media/{filename}")
@@ -411,6 +433,8 @@ async def create_media_case(
     notes: Optional[str] = Form(None),
     source_url: Optional[str] = Form(None),
     name: Optional[str] = Form(None),
+    parent_id: Optional[str] = Form(None),
+    parent_label: Optional[str] = Form(None),
 ):
     """
     Upload image → pipeline runs immediately.
@@ -450,6 +474,8 @@ async def create_media_case(
         url=f"media:{safe_name}",
         name=name or None,
         notes=combined_notes or None,
+        parent_id=parent_id or None,
+        parent_label=parent_label or None,
         source_type="media_upload",
         status=CaseStatus.FRAME_SELECT if is_video else CaseStatus.PENDING,
         created_at=now,

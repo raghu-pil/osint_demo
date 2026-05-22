@@ -42,9 +42,11 @@ body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; back
 #clear-all { background: none; border: none; color: var(--text2); font-size: 11px; cursor: pointer; }
 #clear-all:hover { color: var(--critical); }
 #case-list { overflow-y: auto; flex: 1; }
-.case-item { padding: 10px 14px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background .1s; display: flex; align-items: flex-start; gap: 6px; }
+.case-item { padding: 8px 14px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background .1s; display: flex; align-items: flex-start; gap: 6px; }
 .case-item:hover { background: var(--bg3); }
 .case-item.active { background: var(--bg3); border-left: 3px solid var(--accent2); }
+.case-tree-indent { display: flex; align-items: stretch; flex-shrink: 0; }
+.case-tree-line { width: 16px; border-left: 1px solid var(--border); margin-left: 7px; }
 .case-item-body { flex: 1; min-width: 0; }
 .case-url { font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .case-name { font-size: 12px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -246,6 +248,7 @@ td a { color: var(--accent2); }
     <div id="case-view">
       <div id="case-header">
         <div id="case-header-content">
+          <div id="case-breadcrumb" style="font-size:11px;color:var(--text2);margin-bottom:4px;display:none"></div>
           <div id="case-title">Investigation</div>
           <div id="case-url-display"></div>
           <div id="case-status-row"></div>
@@ -344,6 +347,9 @@ function renderKnownAccountsSection(publicUrl) {
   </div>`;
 }
 
+// ── Case index cache (used for breadcrumb) ────────────────────────────────────
+let _caseIndex = {};  // id → case (kept fresh by renderSidebar)
+
 // ── API helpers ───────────────────────────────────────────────────────────────
 async function api(path, opts={}) {
   const r = await fetch(API + path, opts);
@@ -351,11 +357,12 @@ async function api(path, opts={}) {
   return r.json();
 }
 
-async function postCase(url, notes, name) {
+async function postCase(url, notes, name, parentId, parentLabel) {
   return api('/cases', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({url, notes: notes||null, name: name||null})
+    body: JSON.stringify({url, notes: notes||null, name: name||null,
+                          parent_id: parentId||null, parent_label: parentLabel||null})
   });
 }
 
@@ -370,16 +377,47 @@ async function deleteAllCases() {
 function renderSidebar(cases) {
   const el = document.getElementById('case-list');
   if (!cases.length) { el.innerHTML = '<div style="padding:20px;color:var(--text2);font-size:12px;text-align:center">No cases yet</div>'; return; }
-  el.innerHTML = cases.map(c => {
+
+  // Build tree structure
+  const byId = {};
+  const children = {};  // parentId → [child cases]
+  for (const c of cases) {
+    byId[c.id] = c;
+    _caseIndex[c.id] = c;  // keep global index fresh
+    const pid = c.parent_id || '__root__';
+    if (!children[pid]) children[pid] = [];
+    children[pid].push(c);
+  }
+  // Sort each level newest-first
+  for (const key of Object.keys(children)) {
+    children[key].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  }
+
+  function renderNode(c, depth) {
     const d = new Date(c.created_at);
     const timeStr = d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
     const risk = c.risk_label || 'MINIMAL';
-    const _subtitle = c.source_type === 'media_upload' ? c.url.replace('media:','') : c.url;
-    return `
+    const subtitle = c.source_type === 'media_upload' ? c.url.replace('media:','') : c.url;
+    const nodeChildren = children[c.id] || [];
+    const hasChildren = nodeChildren.length > 0;
+
+    // Indentation lines for depth
+    let indentHtml = '';
+    for (let i = 0; i < depth; i++) {
+      indentHtml += `<div class="case-tree-line"></div>`;
+    }
+    const branchSymbol = depth > 0 ? `<div style="width:10px;flex-shrink:0;border-bottom:1px solid var(--border);margin-bottom:7px;margin-left:-1px"></div>` : '';
+
+    let html = `
       <div class="case-item ${c.id===currentCaseId?'active':''}" onclick="selectCase('${c.id}')">
+        ${depth > 0 ? `<div class="case-tree-indent">${indentHtml}${branchSymbol}</div>` : ''}
         <div class="case-item-body">
-          <div class="case-name">${escHtml(c.id)}${c.name ? ` (${escHtml(c.name)})` : ''}</div>
-          <div class="case-url" style="font-size:11px;color:var(--text2)">${escHtml(_subtitle)}</div>
+          <div class="case-name" style="display:flex;align-items:center;gap:5px">
+            ${hasChildren ? `<span style="font-size:10px;color:var(--text2)" title="${nodeChildren.length} branch(es)">⑂${nodeChildren.length}</span>` : ''}
+            ${escHtml(c.id)}${c.name ? ` <span style="color:var(--text2);font-weight:400">(${escHtml(c.name)})</span>` : ''}
+          </div>
+          ${c.parent_label ? `<div style="font-size:10px;color:var(--accent2);margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escHtml(c.parent_label)}">↳ ${escHtml(c.parent_label.slice(0,45))}</div>` : ''}
+          <div class="case-url" style="font-size:10px;color:var(--text2)">${escHtml(subtitle.slice(0,50))}</div>
           <div class="case-meta">
             <span class="status-dot dot-${c.status}"></span>
             <span>${c.status}</span>
@@ -390,7 +428,23 @@ function renderSidebar(cases) {
         </div>
         <button class="case-delete" onclick="deleteCase(event,'${c.id}')" title="Delete case">×</button>
       </div>`;
-  }).join('');
+
+    // Render children (oldest-first so the chain reads top-to-bottom chronologically)
+    for (const child of [...nodeChildren].reverse()) {
+      html += renderNode(child, depth + 1);
+    }
+    return html;
+  }
+
+  // Render roots (newest-first)
+  const roots = children['__root__'] || [];
+  // Also catch orphans (parent deleted)
+  const allParented = new Set(cases.filter(c => c.parent_id).map(c => c.id));
+  const orphans = cases.filter(c => c.parent_id && !byId[c.parent_id]);
+  const rootsAndOrphans = [...roots, ...orphans];
+
+  el.innerHTML = rootsAndOrphans.map(c => renderNode(c, 0)).join('') ||
+    '<div style="padding:20px;color:var(--text2);font-size:12px;text-align:center">No cases yet</div>';
 }
 
 async function deleteCase(event, caseId) {
@@ -518,6 +572,24 @@ function renderCase(c) {
   document.getElementById('case-title').textContent = c.name ? `${c.id} (${c.name})` : c.id;
   document.getElementById('case-url-display').textContent =
     c.source_type === 'media_upload' ? c.url.replace('media:', '') : c.url;
+
+  // Breadcrumb — walk up ancestor chain and make each node clickable
+  const bcEl = document.getElementById('case-breadcrumb');
+  if (c.parent_id) {
+    const path = [];
+    let cur = c;
+    while (cur && cur.parent_id && _caseIndex[cur.parent_id]) {
+      cur = _caseIndex[cur.parent_id];
+      path.unshift(cur);
+    }
+    if (path.length) {
+      bcEl.style.display = '';
+      bcEl.innerHTML = path.map(p =>
+        `<span onclick="selectCase('${p.id}')" style="cursor:pointer;color:var(--accent2)">${escHtml(p.name || p.id)}</span>`
+      ).join(' <span style="opacity:.4">›</span> ') +
+        ` <span style="opacity:.4">›</span> <span>${escHtml(c.name || c.id)}</span>`;
+    } else { bcEl.style.display = 'none'; }
+  } else { bcEl.style.display = 'none'; }
 
   // Thumbnail (right side of header)
   const thumbEl = document.getElementById('case-thumb');
@@ -649,7 +721,7 @@ function renderAutoResult(item) {
         html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">';
         for (const m of sr.all_matches.slice(0,6)) {
           html += `<div style="font-size:11px;background:var(--bg3);border-radius:4px;padding:4px 6px;max-width:200px">`;
-          if (m.thumbnail) html += `<img src="${escHtml(m.thumbnail)}" style="width:100%;height:60px;object-fit:cover;border-radius:3px;margin-bottom:3px;display:block">`;
+          if (m.thumbnail && typeof m.thumbnail === 'string') html += `<img src="${escHtml(m.thumbnail)}" data-src="${escHtml(m.thumbnail)}" style="width:100%;height:60px;object-fit:cover;border-radius:3px;margin-bottom:3px;display:block" onerror="if(!this.dataset.proxied){this.dataset.proxied='1';this.src='/api/proxy-image?url='+encodeURIComponent(this.dataset.src);}else{this.style.display='none';}">`;
           html += `<a href="${escHtml(m.link)}" target="_blank" style="color:var(--accent2);font-size:10px">${escHtml((m.title||m.source||m.link).slice(0,40))}</a>`;
           html += `<div style="color:var(--text2);font-size:10px">${escHtml(m.engine)} · ${escHtml(m.source||'')}</div>`;
           html += '</div>';
@@ -1298,7 +1370,7 @@ function renderReverseSearchResult(data) {
     html += `<div style="display:flex;flex-wrap:wrap;gap:6px">`;
     for (const m of ems) {
       html += `<div style="background:var(--bg3);border-radius:5px;overflow:hidden;border:1px solid var(--border);width:160px">`;
-      if (m.thumbnail) html += `<img src="${escHtml(m.thumbnail)}" style="width:100%;height:70px;object-fit:cover;display:block" onerror="this.style.display='none'">`;
+      if (m.thumbnail && typeof m.thumbnail === 'string') html += `<img src="${escHtml(m.thumbnail)}" data-src="${escHtml(m.thumbnail)}" style="width:100%;height:70px;object-fit:cover;display:block" onerror="if(!this.dataset.proxied){this.dataset.proxied='1';this.src='/api/proxy-image?url='+encodeURIComponent(this.dataset.src);}else{this.style.display='none';}">`;
       html += `<div style="padding:5px 7px">
         <a href="${escHtml(m.link)}" target="_blank" style="color:var(--accent2);font-size:11px;font-weight:600;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(m.title||'')}">${escHtml((m.title||m.source||m.link||'').slice(0,40))}</a>
         <div style="color:var(--text2);font-size:10px">${escHtml(m.source||'')}</div>
@@ -1759,8 +1831,8 @@ function renderReverseSearch(c) {
           <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">`;
         for (const m of matches) {
           html += `<div style="background:var(--bg3);border-radius:6px;overflow:hidden;border:1px solid var(--border)">`;
-          if (m.thumbnail) {
-            html += `<img src="${escHtml(m.thumbnail)}" style="width:100%;height:80px;object-fit:cover;display:block" onerror="this.style.display='none'">`;
+          if (m.thumbnail && typeof m.thumbnail === 'string') {
+            html += `<img src="${escHtml(m.thumbnail)}" data-src="${escHtml(m.thumbnail)}" style="width:100%;height:80px;object-fit:cover;display:block" onerror="if(!this.dataset.proxied){this.dataset.proxied='1';this.src='/api/proxy-image?url='+encodeURIComponent(this.dataset.src);}else{this.style.display='none';}">`;
           }
           html += `<div style="padding:6px 8px">
             <a href="${escHtml(m.link)}" target="_blank" style="color:var(--accent2);font-size:11px;font-weight:600;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(m.title||'')}">
@@ -2439,12 +2511,14 @@ document.addEventListener('paste', e => {
   setTimeout(() => drop.style.borderColor = '', 600);
 });
 
-async function postMediaCase(file, notes, sourceUrl, name) {
+async function postMediaCase(file, notes, sourceUrl, name, parentId, parentLabel) {
   const fd = new FormData();
   fd.append('file', file);
   if (notes) fd.append('notes', notes);
   if (sourceUrl) fd.append('source_url', sourceUrl);
   if (name) fd.append('name', name);
+  if (parentId) fd.append('parent_id', parentId);
+  if (parentLabel) fd.append('parent_label', parentLabel);
   const r = await fetch(API + '/media-cases', { method: 'POST', body: fd });
   if (!r.ok) throw new Error(await r.text());
   return r.json();
@@ -2704,7 +2778,8 @@ async function investigateAccount(url, label) {
   btn.textContent = 'Starting…';
   try {
     setMode('url');
-    const c = await postCase(url, label ? `From media investigation: ${label}` : '');
+    // Branch from the current case — this creates a child node in the investigation tree
+    const c = await postCase(url, null, null, currentCaseId, label || url);
     await refreshSidebar();
     selectCase(c.id);
   } catch(e) {

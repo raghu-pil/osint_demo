@@ -73,6 +73,8 @@ class InvestigateRequest(BaseModel):
     url: str
     notes: Optional[str] = None
     name: Optional[str] = None
+    parent_id: Optional[str] = None
+    parent_label: Optional[str] = None
 
 
 class DiscoveredAccount(BaseModel):
@@ -136,6 +138,8 @@ class Case(BaseModel):
     url: str
     name: Optional[str] = None
     notes: Optional[str] = None
+    parent_id: Optional[str] = None
+    parent_label: Optional[str] = None
     source_type: str = "url"          # "url" | "media_upload"
     status: CaseStatus = CaseStatus.PENDING
     created_at: str

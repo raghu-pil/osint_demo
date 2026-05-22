@@ -241,7 +241,7 @@ def analyze_image(file_path: str, anthropic_api_key: str,
 
         response = client.messages.create(
             model="claude-opus-4-5",
-            max_tokens=2000,
+            max_tokens=4000,
             messages=[{
                 "role": "user",
                 "content": [

@@ -61,7 +61,7 @@ class MediaFileSummary(BaseModel):
 class IdentityPivot(BaseModel):
     identifier: str
     identifier_type: str    # email | phone | username | name
-    platforms_found: List[Dict[str, str]] = []
+    platforms_found: List[Dict[str, Any]] = []
     gravatar_name: Optional[str] = None
     gravatar_avatar: Optional[str] = None
     hibp_breaches: List[Dict] = []

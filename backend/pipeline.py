@@ -79,12 +79,17 @@ class CaseManager:
             return Case(**json.load(f))
 
     def list_all(self) -> list:
+        import logging as _logging
+        _log = _logging.getLogger(__name__)
         cases = []
         for d in sorted(self.cases_dir.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
             if d.is_dir():
-                c = self.get(d.name)
-                if c:
-                    cases.append(c)
+                try:
+                    c = self.get(d.name)
+                    if c:
+                        cases.append(c)
+                except Exception as e:
+                    _log.warning("Skipping corrupt case %s: %s", d.name, e)
         return cases
 
     def save(self, case: Case):
@@ -181,6 +186,53 @@ def run_pipeline(case_id: str, manager: CaseManager):
             case.errors.append(f"Post scrape: {e}")
             manager.step_fail(case, "scrape_post", str(e))
             report_dict = {}
+
+        # ── Step 2b: Web article fallback for unknown platforms ───────────────
+        if not case.post and case.platform in (None, "unknown", ""):
+            try:
+                from backend.modules.web_scraper import web_scrape_to_post, scrape_web_page
+                _log(case, "Non-social URL — fetching page content and metadata…")
+                manager.save(case)
+                post = web_scrape_to_post(case.url)
+                if post:
+                    case.post = post
+                    case.platform = "web"
+                    meta = post.get("_web_meta", {})
+                    _log(case, f"Page scraped: {meta.get('title','')[:60]}")
+                    manager.step_done(case, "scrape_post",
+                                      f"Web page: {meta.get('domain','')}")
+                    # Download lead image if present
+                    img_url = meta.get("image_url")
+                    if img_url and not config.get("skip_media_download"):
+                        try:
+                            import requests as _req, hashlib, mimetypes
+                            from backend.models import MediaFileSummary
+                            r = _req.get(img_url, headers={"User-Agent": "Mozilla/5.0"},
+                                         timeout=15, stream=True)
+                            r.raise_for_status()
+                            ct = r.headers.get("content-type", "image/jpeg")
+                            ext = mimetypes.guess_extension(ct.split(";")[0].strip()) or ".jpg"
+                            if ext == ".jpe": ext = ".jpg"
+                            data = r.content
+                            sha = hashlib.sha256(data).hexdigest()
+                            fname = f"lead_image{ext}"
+                            media_dir = case_dir / "media"
+                            media_dir.mkdir(exist_ok=True)
+                            fpath = media_dir / fname
+                            fpath.write_bytes(data)
+                            mf = MediaFileSummary(
+                                filename=fname, media_type="image",
+                                file_size=len(data), hash_sha256=sha,
+                                hash_md5=hashlib.md5(data).hexdigest(),
+                                source_url=img_url,
+                                local_path=str(fpath),
+                            )
+                            case.media_files = [mf]
+                            _log(case, f"Lead image downloaded: {fname}")
+                        except Exception as img_e:
+                            _log(case, f"Lead image download failed: {img_e}", level="warn")
+            except Exception as e:
+                _log(case, f"Web scrape fallback failed: {e}", level="warn")
 
         # ── Step 3: Account ───────────────────────────────────────────────────
         manager.step_start(case, "account")
@@ -502,6 +554,23 @@ def run_pipeline(case_id: str, manager: CaseManager):
                 identity_pivots=case.identity_pivots,
                 account_enrichment=case.account_enrichment,
             )
+            # For web article cases, inject a lead that lets the investigator dig deeper
+            if case.platform in ("web", None, "unknown", "") and case.post:
+                from backend.models import GuidanceItem
+                meta = case.post.get("_web_meta", {})
+                title = meta.get("title") or case.post.get("text", "")[:60]
+                domain = meta.get("domain") or ""
+                if not any(g.pivot_url == case.url for g in case.guidance):
+                    case.guidance.insert(0, GuidanceItem(
+                        priority=1, severity="info",
+                        title=f"Web article: {title[:70]}",
+                        detail=f"Source: {domain}. Review this page for context and follow any referenced accounts or claims.",
+                        action="Investigate linked accounts or search for related content.",
+                        pivot_url=case.url,
+                        pivot_label=f"Open {domain}",
+                        category="content",
+                    ))
+
             # Check if investigated account is a known misinfo/factcheck account
             from backend.modules.known_accounts import enrich_guidance_with_known_accounts
             enrich_guidance_with_known_accounts(case)

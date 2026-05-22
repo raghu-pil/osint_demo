@@ -54,3 +54,4 @@ htmlcov/
 
 # Tor data (auto-created)
 /var/lib/tor/
+config.yaml

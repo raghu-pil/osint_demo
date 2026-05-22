@@ -267,6 +267,7 @@ const API = '/api';
 let currentCaseId = null;
 let pollTimer = null;
 let activeTab = 'guidance';
+let _lastTabInteraction = 0;  // timestamp of last tab click, to debounce poll renders
 
 // ── Known accounts database (mirrors backend/modules/known_accounts.py) ──────
 const KNOWN_MISINFO = {
@@ -487,6 +488,8 @@ async function selectCase(id) {
       pollTimer = setInterval(async () => {
         try {
           const fresh = await getCase(id);
+          // Don't overwrite the UI if the user just clicked a tab (within 500ms)
+          if (Date.now() - _lastTabInteraction < 500) return;
           renderCase(fresh);
           if (fresh.status !== 'running' && fresh.status !== 'pending' && fresh.status !== 'frame_select') {
             clearInterval(pollTimer);
@@ -683,6 +686,7 @@ function renderCase(c) {
 
 function switchTab(tabId) {
   activeTab = tabId;
+  _lastTabInteraction = Date.now();  // pause poll render briefly so click isn't overwritten
   if (graphSimulation && tabId !== 'graph') { graphSimulation.cancel(); graphSimulation = null; }
   const tc = document.getElementById('tab-content');
   if (tabId === 'graph' || tabId === 'authentify') {
@@ -826,13 +830,12 @@ function renderAuthentify() {
 
 function renderGuidance(c) {
   const items = c.guidance || [];
-  if (c.status === 'running' || c.status === 'pending') {
-    return `<div style="color:var(--text2);padding:30px;text-align:center">
-      <div style="font-size:24px;margin-bottom:8px">⟳</div>
-      <div>Investigation in progress… results will appear here</div>
+  const running = c.status === 'running' || c.status === 'pending';
+  if (!items.length) {
+    return `<div style="color:var(--text2);padding:20px">
+      ${running ? '<span style="font-size:13px">⟳ Generating leads…</span>' : 'No leads generated yet.'}
     </div>`;
   }
-  if (!items.length) return '<div style="color:var(--text2);padding:20px">No guidance generated yet.</div>';
 
   const critical = items.filter(i=>i.severity==='critical');
   const high = items.filter(i=>i.severity==='high');
@@ -856,7 +859,10 @@ function renderGuidance(c) {
         </div>
         ${item.detail ? `<div class="g-detail">${escHtml(item.detail)}</div>` : ''}
         ${item.action ? `<div class="g-action">${escHtml(item.action)}</div>` : ''}
-        ${item.pivot_url ? `<a class="g-link" href="${escHtml(item.pivot_url)}" target="_blank">↗ ${escHtml(item.pivot_label||item.pivot_url)}</a>` : ''}
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:${item.action||item.detail?'0':'4px'}">
+          ${item.pivot_url ? `<a class="g-link" href="${escHtml(item.pivot_url)}" target="_blank">↗ ${escHtml(item.pivot_label||item.pivot_url)}</a>` : ''}
+          ${item.pivot_url ? `<button class="invest-btn" data-url="${escHtml(item.pivot_url)}" data-label="${escHtml(item.pivot_label||item.title)}" style="background:var(--accent2);color:#fff;border:none;border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer">Full Investigation →</button>` : ''}
+        </div>
         ${item.auto_result ? renderAutoResult(item) : ''}
       </div>`;
   }
@@ -912,6 +918,7 @@ function renderGuidance(c) {
           ${r.source  ? `<span style="color:var(--text2);font-size:11px"> · ${escHtml(r.source)}</span>` : ''}
           ${r.published ? `<span style="color:var(--text2);font-size:10px"> · ${escHtml(r.published)}</span>` : ''}
           ${r.snippet ? `<div style="color:var(--text2);font-size:11px;margin-top:2px">${escHtml(r.snippet.slice(0,140))}</div>` : ''}
+          ${investBtn(r.link, r.title||r.channel||r.source)}
         </div>`;
       }
     } else {
@@ -955,6 +962,7 @@ function renderGuidance(c) {
         <a href="${escHtml(a.url)}" target="_blank" style="color:var(--critical);font-weight:600">${escHtml(a.title)}</a>
         ${a.source ? `<span style="color:var(--text2);font-size:11px"> · ${escHtml(a.source)}</span>` : ''}
         ${a.snippet ? `<div style="color:var(--text2);font-size:11px;margin-top:2px">${escHtml(a.snippet.slice(0,140))}</div>` : ''}
+        ${investBtn(a.url, a.title||a.source)}
       </div>`;
     }
     html += '</div>';
@@ -1101,6 +1109,7 @@ function renderImageAnalysisCard(c) {
           ${r.source  ? `<span style="color:var(--text2);font-size:11px"> · ${escHtml(r.source)}</span>` : ''}
           ${r.published ? `<span style="color:var(--text2);font-size:10px"> · ${escHtml(r.published)}</span>` : ''}
           ${r.snippet ? `<div style="color:var(--text2);font-size:11px;margin-top:2px">${escHtml(r.snippet.slice(0,140))}</div>` : ''}
+          ${investBtn(r.link, r.title||r.channel||r.source)}
         </div>`;
       }
     } else {
@@ -1118,6 +1127,7 @@ function renderImageAnalysisCard(c) {
         <a href="${escHtml(a.url)}" target="_blank" style="color:var(--critical);font-weight:600">${escHtml(a.title)}</a>
         ${a.source ? `<span style="color:var(--text2);font-size:11px"> · ${escHtml(a.source)}</span>` : ''}
         ${a.snippet ? `<div style="color:var(--text2);font-size:11px;margin-top:2px">${escHtml(a.snippet.slice(0,140))}</div>` : ''}
+        ${investBtn(a.url, a.title||a.source)}
       </div>`;
     }
     html += '</div>';
@@ -1141,6 +1151,26 @@ function renderPost(c) {
   if (!p) return `<div style="color:var(--text2);padding:20px">No post data available. ${c.errors?.length?'Check errors in the Leads tab.':''}</div>`;
 
   const eng = p.engagement || {};
+  const webMeta = p._web_meta;
+
+  // Web page: show as article card
+  if (p.platform === 'web' && webMeta) {
+    return `${renderImageAnalysisCard(c)}${renderIntelligence(c.post_intelligence)}
+    <div class="card">
+      <div class="card-title">Web Article</div>
+      ${webMeta.image_url ? `<img src="${escHtml(webMeta.image_url)}" style="width:100%;max-height:260px;object-fit:cover;border-radius:4px;margin-bottom:12px;display:block" onerror="this.style.display='none'">` : ''}
+      <div style="font-size:16px;font-weight:600;margin-bottom:8px;line-height:1.4">${escHtml(webMeta.title||p.url)}</div>
+      ${webMeta.site_name||p.author_display_name ? `<div style="font-size:12px;color:var(--text2);margin-bottom:8px">${escHtml(webMeta.site_name||'')}${p.author_display_name?' · '+escHtml(p.author_display_name):''}</div>` : ''}
+      ${p.created_at ? `<div style="font-size:12px;color:var(--text2);margin-bottom:10px">${new Date(p.created_at).toLocaleString()}</div>` : ''}
+      ${webMeta.description ? `<div style="font-size:13px;color:var(--text2);margin-bottom:12px;line-height:1.5;border-left:3px solid var(--border);padding-left:10px">${escHtml(webMeta.description)}</div>` : ''}
+      ${p.text ? `<div style="font-size:13px;line-height:1.6;color:var(--text)">${escHtml(p.text.slice(0,800))}${p.text.length>800?'…':''}</div>` : ''}
+      <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+        <a href="${escHtml(p.url)}" target="_blank" class="g-link">Open article ↗</a>
+        ${investBtn(p.url, webMeta.title || p.url)}
+      </div>
+    </div>`;
+  }
+
   return `${renderImageAnalysisCard(c)}${renderIntelligence(c.post_intelligence)}
     <div class="card">
       <div class="card-title">Post Content</div>
@@ -1345,6 +1375,16 @@ async function runReverseSearch(caseId, filename, timestamp, resultContainerId) 
   }
 }
 
+// Small "Investigate →" button that branches the current investigation
+function investBtn(url, label) {
+  if (!url) return '';
+  const safeUrl = escHtml(url);
+  const safeLabel = escHtml((label||url).slice(0,80));
+  return `<button class="invest-btn" data-url="${safeUrl}" data-label="${safeLabel}"
+    style="background:none;border:1px solid var(--accent2);color:var(--accent2);border-radius:3px;padding:2px 7px;font-size:10px;cursor:pointer;white-space:nowrap;margin-top:4px">
+    Investigate →</button>`;
+}
+
 function renderReverseSearchResult(data) {
   if (!data.success) return `<div style="color:var(--critical);font-size:12px">Search failed.</div>`;
   const matches = data.matches || [];
@@ -1375,6 +1415,7 @@ function renderReverseSearchResult(data) {
         <a href="${escHtml(m.link)}" target="_blank" style="color:var(--accent2);font-size:11px;font-weight:600;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(m.title||'')}">${escHtml((m.title||m.source||m.link||'').slice(0,40))}</a>
         <div style="color:var(--text2);font-size:10px">${escHtml(m.source||'')}</div>
         ${m.date?`<div style="color:var(--medium);font-size:10px">${escHtml(m.date)}</div>`:''}
+        ${investBtn(m.link, m.title||m.source)}
       </div></div>`;
     }
     html += '</div></div>';
@@ -1841,6 +1882,7 @@ function renderReverseSearch(c) {
             <div style="color:var(--text2);font-size:10px;margin-top:2px">${escHtml(m.source||(()=>{try{return new URL(m.link||'').hostname}catch{return''}})())}</div>
             ${m.date ? `<div style="color:var(--medium);font-size:10px;margin-top:1px">${escHtml(m.date)}</div>` : ''}
             ${m.snippet ? `<div style="color:var(--text2);font-size:10px;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(m.snippet)}">${escHtml(m.snippet.slice(0,60))}</div>` : ''}
+            ${investBtn(m.link, m.title||m.source)}
           </div></div>`;
         }
         html += '</div></div>';
@@ -2584,6 +2626,7 @@ function renderDiscoveredAccounts(c) {
           <a href="${escHtml(r.link)}" target="_blank" style="color:var(--critical);font-weight:600">${escHtml(r.title)}</a>
           ${r.source ? `<span style="color:var(--text2);font-size:11px"> · ${escHtml(r.source)}</span>` : ''}
           ${r.snippet ? `<div style="color:var(--text2);font-size:11px;margin-top:2px">${escHtml(r.snippet.slice(0,140))}</div>` : ''}
+          ${investBtn(r.link, r.title||r.channel||r.source)}
         </div>`;
       }
       html += '</div>';

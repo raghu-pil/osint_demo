@@ -21,6 +21,13 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
+# Hosts where direct HTTPS is commonly blocked by upstream networks; route via Tor
+TOR_FALLBACK_HOSTS = ("twimg.com", "twitter.com", "x.com", "t.co")
+TOR_PROXY = {
+    "http": "socks5h://127.0.0.1:9050",
+    "https": "socks5h://127.0.0.1:9050",
+}
+
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tiff", ".heic"}
 VIDEO_EXTS = {".mp4", ".webm", ".mov", ".avi", ".mkv", ".flv", ".m4v", ".ts"}
 AUDIO_EXTS = {".mp3", ".wav", ".ogg", ".m4a", ".aac", ".flac", ".opus"}
@@ -269,10 +276,34 @@ def download_with_ytdlp(url: str, output_dir: str) -> List[MediaFileSummary]:
     return results
 
 
+def _http_get_stream(url: str):
+    """GET with auto Tor fallback for hosts that are commonly network-blocked."""
+    from urllib.parse import urlparse
+    host = urlparse(url).netloc.lower()
+    headers = dict(HEADERS)
+    if any(h in host for h in ("twimg.com", "twitter.com", "x.com")):
+        headers["Referer"] = "https://twitter.com/"
+    try:
+        resp = requests.get(url, headers=headers, timeout=30, stream=True)
+        resp.raise_for_status()
+        return resp
+    except Exception as e:
+        if any(host.endswith(h) or host == h for h in TOR_FALLBACK_HOSTS):
+            logger.info("Direct fetch failed for %s (%s); retrying via Tor", host, e)
+            try:
+                resp = requests.get(url, headers=headers, timeout=60,
+                                    stream=True, proxies=TOR_PROXY)
+                resp.raise_for_status()
+                return resp
+            except Exception as e2:
+                logger.debug("Tor fetch also failed for %s: %s", url, e2)
+                raise
+        raise
+
+
 def download_direct(url: str, output_dir: str) -> Optional[MediaFileSummary]:
     try:
-        resp = requests.get(url, headers=HEADERS, timeout=30, stream=True)
-        resp.raise_for_status()
+        resp = _http_get_stream(url)
         ct = resp.headers.get("Content-Type", "")
         ext = ext_from_content_type(ct)
         if not ext:

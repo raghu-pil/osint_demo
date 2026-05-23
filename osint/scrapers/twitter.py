@@ -148,33 +148,44 @@ class TwitterScraper(BaseScraper):
 
         # Media — fxtwitter uses nested photos/videos, vxtwitter uses media_extended
         media_items: List[MediaItem] = []
-        media_block = tweet.get("media") or {}
-        for photo in media_block.get("photos", []) or []:
-            url = photo.get("url") or photo.get("media_url_https", "")
-            if url:
-                media_items.append(MediaItem(
-                    url=url, media_type="image",
-                    width=photo.get("width"), height=photo.get("height"),
-                ))
-        for video in media_block.get("videos", []) or []:
-            url = video.get("url") or video.get("media_url_https", "")
-            if url:
-                media_items.append(MediaItem(
-                    url=url, media_type="video",
-                    width=video.get("width"), height=video.get("height"),
-                    duration_seconds=video.get("duration"),
-                ))
-        # vxtwitter flat media_extended list
-        for m in tweet.get("media_extended", []) or []:
-            murl = m.get("url") or m.get("media_url_https", "")
-            mtype = m.get("type", "image")
-            if murl and not any(x.url == murl for x in media_items):
-                media_items.append(MediaItem(
-                    url=murl,
-                    media_type="video" if mtype in ("video", "animated_gif") else "image",
-                    width=m.get("size", {}).get("width"),
-                    height=m.get("size", {}).get("height"),
-                ))
+
+        def _extract_media_block(block: dict):
+            for photo in block.get("photos", []) or []:
+                url = photo.get("url") or photo.get("media_url_https", "")
+                if url and not any(x.url == url for x in media_items):
+                    media_items.append(MediaItem(
+                        url=url, media_type="image",
+                        width=photo.get("width"), height=photo.get("height"),
+                    ))
+            for video in block.get("videos", []) or []:
+                url = video.get("url") or video.get("media_url_https", "")
+                if url and not any(x.url == url for x in media_items):
+                    media_items.append(MediaItem(
+                        url=url, media_type="video",
+                        width=video.get("width"), height=video.get("height"),
+                        duration_seconds=video.get("duration"),
+                    ))
+
+        _extract_media_block(tweet.get("media") or {})
+        # Also extract media from quoted tweet — fxtwitter wraps it as "quote.media",
+        # vxtwitter wraps it as "qrt" with its own media_extended/mediaURLs
+        _extract_media_block((tweet.get("quote") or {}).get("media") or {})
+
+        def _extract_media_extended(items):
+            for m in items or []:
+                murl = m.get("url") or m.get("media_url_https", "")
+                mtype = m.get("type", "image")
+                if murl and not any(x.url == murl for x in media_items):
+                    media_items.append(MediaItem(
+                        url=murl,
+                        media_type="video" if mtype in ("video", "animated_gif") else "image",
+                        width=(m.get("size") or {}).get("width"),
+                        height=(m.get("size") or {}).get("height"),
+                    ))
+
+        # vxtwitter flat media_extended list (tweet itself + quoted tweet)
+        _extract_media_extended(tweet.get("media_extended"))
+        _extract_media_extended((tweet.get("qrt") or {}).get("media_extended"))
 
         # Hashtags / mentions
         hashtags = [h.lstrip("#") for h in (tweet.get("hashtags") or [])]

@@ -240,8 +240,9 @@ def analyze_image(file_path: str, anthropic_api_key: str,
         prompt, is_deepfake = _build_prompt(post_context)
 
         response = client.messages.create(
-            model="claude-opus-4-5",
-            max_tokens=4000,
+            model="claude-sonnet-4-6",
+            max_tokens=8000,
+            system="You are a forensic image analysis assistant. Respond with valid JSON only — no markdown fences, no preamble, no explanation outside the JSON object.",
             messages=[{
                 "role": "user",
                 "content": [
@@ -254,12 +255,10 @@ def analyze_image(file_path: str, anthropic_api_key: str,
         raw = response.content[0].text.strip()
         logger.info("Claude image analysis response: %s…", raw[:120])
 
-        # Parse JSON — handle markdown fences, trailing commas, and other Claude quirks
         def _try_parse(s: str):
             try:
                 return json.loads(s)
             except json.JSONDecodeError:
-                # Remove trailing commas before } or ]
                 cleaned = re.sub(r',\s*([}\]])', r'\1', s)
                 try:
                     return json.loads(cleaned)
@@ -268,16 +267,16 @@ def analyze_image(file_path: str, anthropic_api_key: str,
 
         data = _try_parse(raw)
         if data is None:
-            # Strip markdown code fence if present
-            stripped = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw, flags=re.MULTILINE).strip()
+            # Strip markdown code fences (```json ... ```)
+            stripped = re.sub(r'```(?:json)?\s*', '', raw).replace('```', '').strip()
             data = _try_parse(stripped)
         if data is None:
-            # Extract the outermost {...} block
+            # Extract outermost {...} block
             m = re.search(r'\{.*\}', raw, re.DOTALL)
             if m:
                 data = _try_parse(m.group(0))
         if data is None:
-            return {"success": False, "error": f"JSON parse error — Claude returned: {raw[:200]}"}
+            return {"success": False, "error": f"JSON parse error — Claude returned: {raw[:300]}"}
 
         data["success"] = True
         data["is_deepfake_claim"] = is_deepfake

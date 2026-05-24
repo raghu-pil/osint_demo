@@ -106,8 +106,9 @@ def analyze_post(post: Dict, account: Dict, account_enrichment: Any,
         client = anthropic.Anthropic(api_key=anthropic_api_key)
 
         response = client.messages.create(
-            model="claude-opus-4-5",
-            max_tokens=1500,
+            model="claude-sonnet-4-6",
+            max_tokens=4000,
+            system="You are a forensic analysis assistant. Respond with valid JSON only — no markdown fences, no preamble, no explanation outside the JSON object.",
             messages=[{
                 "role": "user",
                 "content": POST_ANALYSIS_PROMPT.format(post_data=post_data),
@@ -117,14 +118,26 @@ def analyze_post(post: Dict, account: Dict, account_enrichment: Any,
         raw = response.content[0].text.strip()
         logger.info("Post analysis response: %s…", raw[:100])
 
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError:
+        def _try_parse(s: str):
+            try:
+                return json.loads(s)
+            except json.JSONDecodeError:
+                cleaned = re.sub(r',\s*([}\]])', r'\1', s)
+                try:
+                    return json.loads(cleaned)
+                except json.JSONDecodeError:
+                    return None
+
+        data = _try_parse(raw)
+        if data is None:
+            stripped = re.sub(r'```(?:json)?\s*', '', raw).replace('```', '').strip()
+            data = _try_parse(stripped)
+        if data is None:
             m = re.search(r"\{.*\}", raw, re.DOTALL)
             if m:
-                data = json.loads(m.group(0))
-            else:
-                return {"success": False, "error": "Non-JSON response", "raw": raw}
+                data = _try_parse(m.group(0))
+        if data is None:
+            return {"success": False, "error": "Non-JSON response", "raw": raw[:200]}
 
         data["success"] = True
         return data

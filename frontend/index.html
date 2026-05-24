@@ -804,7 +804,13 @@ function renderTabContent(c, tab) {
   const el = document.getElementById('tab-content');
   switch(tab) {
     case 'guidance':   el.innerHTML = renderGuidance(c); break;
-    case 'authentify': el.innerHTML = renderAuthentify(); break;
+    case 'authentify': {
+      // Skip re-render if already showing the completed PDF iframe — avoids the main
+      // pollTimer overwriting it every 2s while the OSINT case is still running.
+      const _ac = document.getElementById('authentify-container');
+      if (_ac && _ac.querySelector('iframe')) break;
+      el.innerHTML = renderAuthentify(c); initAuthentify(c); break;
+    }
     case 'post':     el.innerHTML = renderPost(c); break;
     case 'account':  el.innerHTML = renderAccount(c); break;
     case 'timeline': el.innerHTML = renderTimeline(c); break;
@@ -822,22 +828,139 @@ function renderTabContent(c, tab) {
   }
 }
 
-function renderAuthentify() {
+let _authentifyPollTimer = null;
+
+function _authentifyFilename(c) {
+  if (c.source_type === 'media_upload' && c.url?.startsWith('media:')) {
+    return c.url.replace('media:', '');
+  }
+  return c.media_files?.[0]?.filename || null;
+}
+
+function renderAuthentify(c) {
+  const filename = _authentifyFilename(c);
+  const fileLabel = filename
+    ? `<div style="font-size:12px;color:var(--text2);margin-bottom:20px">File: <code>${filename}</code></div>`
+    : `<div style="font-size:12px;color:#e55;margin-bottom:20px">No media file found in this case</div>`;
   return `<div style="width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center" id="authentify-container">
     <div style="text-align:center;padding:40px">
       <img src="/static/logo.png" style="height:48px;width:auto;margin-bottom:24px;display:block;margin-left:auto;margin-right:auto">
-      <button onclick="loadAuthentifyReport()" style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:12px 32px;font-size:15px;font-weight:600;cursor:pointer;letter-spacing:0.5px">
+      ${fileLabel}
+      <button id="authentify-btn" onclick="startAuthentify('${c.id}')" ${!filename ? 'disabled' : ''}
+        style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:12px 32px;font-size:15px;font-weight:600;cursor:${filename?'pointer':'not-allowed'};letter-spacing:0.5px;opacity:${filename?1:0.5}">
         Authentify
       </button>
     </div>
+    <div id="authentify-progress" style="display:none;width:100%;max-width:480px;padding:0 40px 40px"></div>
   </div>`;
 }
 
-function loadAuthentifyReport() {
+function initAuthentify(c) {
+  if (_authentifyPollTimer) { clearInterval(_authentifyPollTimer); _authentifyPollTimer = null; }
+  fetch(`/api/cases/${c.id}/authentify/status`)
+    .then(r => r.ok ? r.json() : null)
+    .then(job => { if (job) _applyAuthentifyState(c.id, job); })
+    .catch(() => {});
+}
+
+async function startAuthentify(caseId) {
+  const btn = document.getElementById('authentify-btn');
+  if (btn) btn.disabled = true;
+
+  const c = await getCase(caseId);
+  const filename = _authentifyFilename(c);
+  if (!filename) return;
+
+  const resp = await fetch(`/api/cases/${caseId}/authentify`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({filename}),
+  });
+  const job = await resp.json();
+  _applyAuthentifyState(caseId, job);
+  if (!['completed','failed'].includes(job.status)) {
+    _authentifyPollTimer = setInterval(() => _pollAuthentify(caseId), 3000);
+  }
+}
+
+async function _pollAuthentify(caseId) {
+  try {
+    const resp = await fetch(`/api/cases/${caseId}/authentify/status`);
+    if (!resp.ok) return;
+    const job = await resp.json();
+    _applyAuthentifyState(caseId, job);
+    if (['completed','failed'].includes(job.status)) {
+      clearInterval(_authentifyPollTimer);
+      _authentifyPollTimer = null;
+    }
+  } catch(e) {}
+}
+
+function _applyAuthentifyState(caseId, job) {
   const container = document.getElementById('authentify-container');
-  container.style.alignItems = 'stretch';
-  container.style.justifyContent = 'flex-start';
-  container.innerHTML = `<iframe src="/static/sample_report.pdf" style="flex:1;width:100%;border:none;min-height:calc(100vh - 220px)" title="Authentify Report"></iframe>`;
+  if (!container) { clearInterval(_authentifyPollTimer); _authentifyPollTimer = null; return; }
+
+  if (job.status === 'completed') {
+    container.style.alignItems = 'stretch';
+    container.style.justifyContent = 'flex-start';
+    container.innerHTML = `<iframe src="/api/cases/${caseId}/authentify/report"
+      style="flex:1;width:100%;border:none;min-height:calc(100vh - 220px)" title="Authentify Report"></iframe>`;
+    return;
+  }
+
+  const progress = document.getElementById('authentify-progress');
+  const btn = document.getElementById('authentify-btn');
+  if (!progress) return;
+
+  if (job.status === 'failed') {
+    progress.style.display = 'block';
+    progress.innerHTML = `<div style="color:#e55;font-size:13px;text-align:center">
+      Error: ${job.error || 'Pipeline failed'}</div>`;
+    if (btn) { btn.disabled = false; }
+    return;
+  }
+
+  if (btn) btn.style.display = 'none';
+  progress.style.display = 'block';
+
+  const stepLabels = {
+    pending: 'Starting…',
+    uploading: 'Uploading file…',
+    extracting_metadata: 'Extracting metadata…',
+    running_inference: 'Starting inference…',
+    creating_project: 'Creating project…',
+    polling_inference: 'Analyzing…',
+    updating_status: 'Updating status…',
+    generating_report: 'Generating report…',
+    downloading_report: 'Downloading report…',
+  };
+  const label = stepLabels[job.status] || job.status;
+
+  let chunksHtml = '';
+  if (job.status === 'polling_inference') {
+    const done = job.chunks_processed ?? job.frames_processed ?? 0;
+    const total = job.total_chunks ?? job.total_frames ?? 0;
+    if (total > 0) {
+      const pct = Math.round((done / total) * 100);
+      chunksHtml = `
+        <div style="margin-top:12px;font-size:13px;color:var(--text2)">${done} / ${total} chunks processed (${pct}%)</div>
+        <div style="margin-top:8px;background:var(--bg3);border-radius:4px;height:6px;overflow:hidden">
+          <div style="background:var(--accent);height:100%;width:${pct}%;transition:width 0.3s"></div>
+        </div>`;
+    } else {
+      chunksHtml = `<div style="margin-top:8px;font-size:13px;color:var(--text2)">Processing…</div>`;
+    }
+  }
+
+  progress.innerHTML = `
+    <div style="text-align:center">
+      <div style="font-size:14px;font-weight:600;color:var(--text1)">${label}</div>
+      ${chunksHtml}
+      <div style="margin-top:16px;font-size:11px;color:var(--text2)">
+        <span class="spinner" style="display:inline-block;width:12px;height:12px;border:2px solid var(--text2);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite;margin-right:6px;vertical-align:middle"></span>
+        Running deepfake detection…
+      </div>
+    </div>`;
 }
 
 function renderGuidance(c) {

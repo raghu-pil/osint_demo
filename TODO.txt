@@ -1,0 +1,479 @@
+================================================================================
+AUTHINTIFY — MASTER PLAN
+Goal: Given a URL / video / photo / audio, get maximum intel on the content
+      AND the person who posted it.
+================================================================================
+
+Two parallel tracks on every investigation:
+  CONTENT TRACK  — What is this? Is it real? Where did it originate?
+  PERSON TRACK   — Who posted it? What else do we know about them?
+
+================================================================================
+PHASE 0 — FOUNDATION (do this before anything else, 2-3 days)
+          "Fix what's broken before building what's new"
+================================================================================
+
+[ ] CRITICAL: Rotate leaked API keys (Anthropic + SerpAPI are in git history)
+    - Generate new keys at console.anthropic.com and serpapi.com
+    - They are permanently exposed in commit b828f44..536295d
+
+[ ] Move all secrets out of config.yaml into .env
+    - config.yaml should only have non-secret settings (skip flags, URLs)
+    - Load via python-dotenv
+    - Add .env and config.yaml to .gitignore
+
+[ ] Authentify integration (deepfake detection)
+    - authentify is a dedicated deepfake detection tool (separate product)
+    - When user clicks the Authentify tab: send the case media to authentify API
+      → receive deepfake analysis report → render it in the tab
+    - API contract TBD (endpoint, auth, request format, response schema)
+    - Until API is ready: show a placeholder with "authentify analysis pending"
+      instead of the current sample PDF
+
+[ ] authintify investigation report (separate from Authentify tab)
+    - authintify needs its OWN exportable report covering the full investigation:
+      case summary, risk score, all pipeline findings, media hashes,
+      timeline, network connections, identity pivots, guidance leads
+    - This is distinct from the deepfake report that comes from authentify
+    - Add a "Download Report" button (PDF) — generate via reportlab from case.json
+    - Add to: top of case view, or as a dedicated "Report" tab
+    - Formats: PDF (primary), JSON (already available via /api/cases/{id}/report)
+
+[ ] Docker + docker-compose
+    - Single command to run: docker-compose up
+    - Include: app + optional Tor sidecar + optional SearXNG sidecar
+    - This is the #1 barrier to anyone else using the tool
+
+[ ] Write a real README
+    - What it does (one paragraph)
+    - Screenshots of the network graph and guidance tab
+    - Installation (Docker path + manual path)
+    - What each API key unlocks and where to get them
+    - Known limitations
+
+================================================================================
+PHASE 1 — IDENTITY EXPANSION (1-2 weeks)
+          "Integrate Holehe + PhoneInfoga + improve existing identity pipeline"
+          Start: after Phase 0
+================================================================================
+
+--- EMAIL LOOKUP ---
+
+[ ] Integrate Holehe (email → which platforms have this account)
+    - pip install holehe (already OSS, MIT license)
+    - Probes 120+ platform registration endpoints in parallel
+    - Add as new step in identity.py pipeline
+    - Show results in Identity tab: platform name, profile URL, profile photo
+    - This is what OSINT Industries does at its core
+
+[ ] Improve Gravatar lookup
+    - Currently basic — expand to return full vCard if available
+    - Hash variants: MD5(email), SHA256(email), trim+lowercase first
+
+[ ] Improve HIBP integration
+    - Currently may be basic — add: breach name, date, exposed data types
+    - Show timeline: when was this email first breached?
+
+[ ] BreachDirectory — add paste site results (not just credential matches)
+    - Pastes often contain context (forum posts, leaked lists with names/addresses)
+
+--- PHONE LOOKUP ---
+
+[ ] Integrate PhoneInfoga (phone number → carrier, country, platform accounts)
+    - pip install phoneinfoga
+    - Gives: carrier, line type (mobile/VOIP/landline), country, timezone
+    - Probes: Snapchat, WhatsApp, Telegram, Viber for account existence
+    - WhatsApp + Telegram phone probing is particularly valuable for
+      India/Pak investigations (primary communication platforms there)
+
+[ ] Add phone → Truecaller lookup (unofficial API / web scrape)
+    - Truecaller has massive India/Pak phone name database
+    - Returns: registered name, spam score, operator
+    - Unofficial scrape — wrap in try/except, rate limit carefully
+
+[ ] Input flexibility: auto-detect if input is email vs phone vs username
+    - Currently the tool starts from a URL — add identity-first entry point
+    - "Investigate this email/phone" as a starting point, not just a pivot
+
+================================================================================
+PHASE 2 — UI & NETWORK GRAPH (2-3 weeks)
+          "Settings page + deep graph expansion"
+          Start: after Phase 1. These are high-visibility, high-value items that
+          users will notice immediately — prioritised over backend-only features.
+================================================================================
+
+--- NETWORK GRAPH (HIGH PRIORITY) ---
+
+[ ] Deep graph expansion — friends/followers traversal to depth 4
+    Current state: graph shows nodes from a single investigation (post → account
+    → platforms found by Sherlock → media → identity pivots). It does NOT
+    fetch the social network of the account being investigated.
+
+    What needs to change:
+    - Click any Account node → "Expand network" button appears
+    - Fetch followers/following for that account (up to N, configurable)
+    - Each fetched account becomes a new node; edges = "follows" / "followed by"
+    - Recursively expandable up to depth 4 from the original subject
+    - Depth 1: direct followers/following of subject
+    - Depth 2: followers/following of those accounts
+    - Depth 3–4: further out — reveals clusters, coordination patterns
+    - Visual: node size = follower count, color = risk score, edge thickness = interaction frequency
+
+    Implementation per platform:
+    - Twitter/X: vxtwitter following endpoint + Nitter /followers page (no official API needed)
+    - Instagram: unofficial graph API (fragile — wrap carefully)
+    - Telegram: Telethon for public channel member lists
+    - Reddit: /user/{u}/friends via JSON API
+
+    Performance considerations:
+    - Don't expand all at once — lazy load on click (expand one node at a time)
+    - Cache fetched nodes in SQLite so re-opening the graph is instant
+    - Add a "Stop expanding" button — depth 4 on a large account = thousands of nodes
+    - Configurable max nodes per expansion (default: 50 per level)
+    - Show "sampled 50 of 12,400 followers" when capped
+
+    Why this is high priority:
+    - Depth-4 graph expansion is the single most powerful feature for detecting
+      coordinated inauthentic behaviour — clusters of accounts that follow each
+      other but no one else, accounts created on the same day, identical posting
+      patterns — all become visible only when you can see the network structure
+
+--- SETTINGS PAGE ---
+
+[ ] Add Settings page to the UI (gear icon or sidebar tab)
+    All config.yaml API keys should be editable from the browser — no file editing.
+    Group by category:
+
+    CORE (affects most investigations):
+      - SerpAPI key          (reverse image search)
+      - Anthropic API key    (image analysis, deepfake detection)
+      - Ollama URL           (self-hosted LLM, e.g. http://localhost:11434)
+      - Ollama model name    (dropdown or text, e.g. llava-llama3)
+
+    IDENTITY & BREACHES:
+      - HIBP API key
+      - Dehashed API key + email
+      - IntelligenceX API key
+      - DarkSearch API key
+
+    SOCIAL PLATFORMS:
+      - Twitter/X bearer token
+      - YouTube Data API key
+      - Nitter instance URL
+
+    SEARCH & DISCOVERY:
+      - SearXNG URL (self-hosted metasearch)
+
+    INVESTIGATION CONTROLS (toggle switches):
+      - Skip Sherlock (username enumeration)
+      - Skip dark web search
+      - Skip cross-post detection
+      - Skip media download
+      - Sherlock timeout (slider, 30–120s)
+
+    Implementation notes:
+      - Backend: add GET /api/settings and POST /api/settings routes
+      - Settings saved to config.yaml (or a separate settings.json)
+      - Sensitive keys shown as password fields (masked by default)
+      - "Test" button per key — fires a quick validation call to that service
+      - Changes take effect immediately (no restart required)
+      - Never expose key values in GET response — return masked or boolean "is_configured"
+
+================================================================================
+PHASE 3 — CONTENT FORENSICS EXPANSION (2-4 weeks)
+          "Add audio support. Deepen video/image analysis."
+          Start: after Phase 1, can run parallel with Phase 2
+================================================================================
+
+--- AUDIO (completely missing today) ---
+
+[ ] Audio file input support (.mp3, .wav, .ogg, .m4a, .opus, .aac)
+    - Add to media upload pipeline alongside image/video
+    - Extract and display:
+      * Container metadata (codec, bitrate, sample rate, duration)
+      * Embedded tags (artist, title, software used — Audacity leaves traces)
+      * Creation/modification timestamps
+      * GPS coordinates if embedded (rare but exists in field recordings)
+
+[ ] Audio fingerprinting via AcoustID/Chromaprint
+    - Identifies if audio clip is from a known song/broadcast
+    - Useful for: detecting repurposed audio, fake "on-the-ground" recordings
+      that are actually old news clips with new video overlaid
+    - pip install pyacoustid + fpcalc binary
+
+[ ] Speech detection and language identification
+    - Use OpenAI Whisper (local, free, runs on CPU)
+    - Detects: is there speech? what language? transcribe it
+    - Transcription feeds into the existing NER pipeline (extract names,
+      locations, phone numbers from spoken content)
+    - Particularly valuable for WhatsApp voice notes circulating in India/Pak
+
+[ ] Audio provenance red flags
+    - Background noise analysis: indoor/outdoor/crowd (librosa)
+    - Detect WhatsApp compression artifacts (specific bitrate/codec signature)
+      — viral WhatsApp audio often has 3-4 generations of re-encoding
+    - Detect abrupt cuts/splices (energy discontinuity detection)
+    - Detect pitch shifting (common manipulation to disguise voice)
+
+--- VIDEO (improve existing) ---
+
+[ ] Extract and analyze audio track from video separately
+    - Run full audio pipeline above on the extracted audio track
+    - Many manipulated videos have authentic video + fake audio or vice versa
+
+[ ] Replace Claude API calls with self-hosted Ollama (SOTA vision+text model)
+    - Current: image analysis + post intelligence call Anthropic API
+      (costs money per call, requires internet, sends content to third party)
+    - Target: run a SOTA multimodal model locally via Ollama
+      Recommended models (pick one based on available VRAM):
+        * llava-llama3 or llava:34b  — strong vision, good text (16GB VRAM)
+        * gemma3:27b                 — strong multimodal (16GB VRAM)
+        * llama3.2-vision:90b        — best quality, needs 48GB+ VRAM
+        * minicpm-v or moondream2    — lightweight, runs on CPU/8GB
+    - Config: llm.provider = "ollama", llm.ollama_base_url already in config.yaml
+    - Scope: backend/modules/image_analysis.py + backend/modules/post_analysis.py
+    - Keep Anthropic as fallback if Ollama is not running
+    - Benefit: no API cost, no data leaves the machine, faster on good GPU
+
+[ ] Improve deepfake detection
+    - Currently relies on Claude vision API (good but expensive per frame)
+    - With Ollama in place: deepfake detection prompt runs locally at no cost
+    - Add: FaceForensics++ style artifact detection (local, free)
+    - Check for: unnatural blinking rate, facial boundary artifacts,
+      temporal inconsistency between frames
+
+[ ] Optical flow analysis for video manipulation
+    - Detects: inserted frames, speed changes, loop points
+    - Use OpenCV calcOpticalFlowFarneback
+
+[ ] Better keyframe selection
+    - Currently extracts 8 fixed frames
+    - Instead: extract frames at scene changes (PySceneDetect)
+    - More meaningful frames for reverse search and face extraction
+
+--- IMAGE (improve existing) ---
+
+[ ] PimEyes / FaceCheck.ID integration (GATED — explicit user action only)
+    - Add "Search by face" button in Media tab — NOT automatic
+    - Show legal disclaimer before running: user confirms they have authority
+    - FaceCheck.ID has a usable API ($)
+    - PimEyes API is expensive — offer as "open in PimEyes" link instead
+
+[ ] TinEye integration
+    - Complements Google Lens/Yandex — different index, often finds older sources
+    - Free tier: 150 searches/month. API available.
+    - Particularly good at finding first appearance of news photos
+
+[ ] Metadata stripping detection
+    - If an image has NO EXIF data, that itself is a red flag — flag it
+    - Most phone photos have EXIF. Deliberate stripping = someone hid something
+    - Show: "EXIF stripped — possible deliberate removal"
+
+[ ] Screenshot detection
+    - Detect if image is a screenshot (uniform DPI, no lens distortion,
+      typical screen resolution ratios)
+    - Screenshots of text/posts should trigger OCR + URL extraction pipeline
+
+================================================================================
+PHASE 4 — INDIA/PAK INTELLIGENCE LAYER (1-2 months)
+          "Build the South Asia-specific data advantage"
+          Start: after Phase 2. Long-running — kick off Scrapy early as it
+          takes months to build a meaningful index.
+================================================================================
+
+--- SCRAPY PIPELINE FOR SOUTH ASIAN SOURCES ---
+
+[ ] Set up Scrapy project (separate from main app, runs as background service)
+    Seed list — Tier 1 (daily scrape):
+      News: timesofindia.com, ndtv.com, thehindu.com, hindustantimes.com,
+            dawn.com, geo.tv, thenews.com.pk, tribuneindia.com,
+            dailypakistan.com.pk, arynews.tv
+      Fact-check: altnews.in, boomlive.in, factcheck.afp.com/in,
+                  smhoaxslayer.com, dawntv.pk/factcheck, propakistani.pk
+      Social aggregators: sharechat.com, moj.tv, josh.app (India-local platforms)
+
+    Filters:
+      - .in, .pk, .bd TLD whitelist
+      - langdetect: accept hi, ur, bn, pa, ta, te, mr (regional languages)
+      - Depth limit: 3 hops from seed
+      - Only pages with <img> tags (face pipeline candidate)
+
+[ ] Common Crawl filter pipeline
+    - Download monthly index (not the full WARC — the CDX index is small)
+    - Filter CDX for .in/.pk/.bd domains → extract image URLs
+    - Use as supplementary URL seed for Scrapy (URLs already known to exist)
+    - Schedule: run when new Common Crawl dump released (monthly)
+    - Tool: cdx-toolkit or commoncrawl Python library
+
+[ ] Face extraction pipeline from scraped images
+    - InsightFace (ArcFace) for face detection + embedding generation
+    - FAISS index for vector storage and similarity search
+    - Store: embedding vector + source URL + scrape date + face crop thumbnail
+    - This becomes your South Asia face search index
+    - Estimated scale: 50-100M images from above sources over 6 months
+
+[ ] India/Pak specific breach databases
+    - Research: known Indian data leaks (Aadhaar leaks, JusPay breach,
+      BigBasket, MobiKwik — these are large Indian breaches with phone/email)
+    - Check if any are on haveibeenpwned or dehashed
+    - Build a curated list of India/Pak specific breach sources
+
+--- KNOWN ACCOUNTS DATABASE EXPANSION ---
+
+[ ] Expand beyond hardcoded list in known_accounts.py
+    - Move to SQLite table (editable without code changes)
+    - Add: political handles (BJP/INC/PTI/PPP official + unofficial accounts)
+    - Add: known troll farms and sock puppet networks (EU DisinfoLab reports,
+      Stanford Internet Observatory India/Pak findings are public)
+    - Add: verified fact-checkers per country/language
+    - Add: state media accounts (DD News, PTV, etc.)
+    - Source: DFRLab, Stanford IO, EU DisinfoLab published reports
+
+[ ] Regional language NER
+    - Current spaCy NER is English-only
+    - Add: iNLTK or IndicNLP for Hindi/Urdu entity extraction
+    - Extract: names, organizations, locations from Hindi/Urdu post text
+    - Critical for analyzing content that isn't in English
+
+================================================================================
+PHASE 5 — NEW INPUT SOURCES (2-4 weeks, parallel with Phase 4)
+          "Expand beyond Twitter/Instagram to where misinfo actually travels"
+================================================================================
+
+[ ] WhatsApp forward analysis
+    - WhatsApp is the PRIMARY misinfo vector in India/Pak
+    - Input: screenshot of a WhatsApp message (already handled via image upload)
+    - Add: OCR the message text → extract URLs, phone numbers, names
+    - Check forwarded label count if visible in screenshot
+    - Search extracted text/URLs in your scraped news database
+
+[ ] Telegram channel investigation
+    - Current scraper is basic
+    - Add: channel member count, post frequency, forward sources
+    - Telegram forward chains: "forwarded from @channel" — follow the chain
+    - Use Telethon (official Telegram MTProto library, no API key needed for
+      public channels)
+
+[ ] YouTube deep investigation
+    - Currently basic scrape
+    - Add: comment analysis (who is commenting, what are they saying)
+    - Channel history: when was channel created, upload frequency
+    - Description links: often links to other platforms
+    - Use YouTube Data API v3 (already in config.yaml)
+
+[ ] Reddit investigation
+    - Currently has scraper
+    - Add: cross-post detection across subreddits
+    - Account history: karma, account age, post patterns
+    - Check if account is shadowbanned (common for misinfo accounts)
+
+[ ] Domain/IP OSINT (new capability — not in tool today)
+    - When a URL is investigated, also investigate the domain:
+      WHOIS: registrar, creation date, registrant (often anonymized but worth checking)
+      DNS history: SecurityTrails or HackerTarget (free tiers available)
+      Certificate Transparency: crt.sh — find all subdomains
+      Hosting: ip-api.com for IP geolocation + ASN (is it hosted on bulletproof hosting?)
+      VirusTotal: URL/domain reputation
+    - Cheap domains registered recently = red flag
+
+================================================================================
+PHASE 6 — ARCHITECTURE & RELIABILITY (ongoing)
+          "Make it not break in production"
+          Start: can begin after Phase 2. SQLite needed for graph caching (Phase 2
+          depends on it), so prioritise that item first within this phase.
+================================================================================
+
+[ ] Modular pipeline system (SpiderFoot pattern)
+    - Each backend/modules/*.py becomes a formal Module with:
+      * declared input types (url, email, phone, image, username)
+      * declared output types (account, post, breach, media, identity)
+    - Modules chain automatically based on input/output types
+    - Makes adding new data sources trivial: write one module, it slots in
+
+[ ] Replace JSON file storage with SQLite
+    - cases/{id}/case.json → SQLite with proper schema
+    - Enables: search across cases, deduplication, relationship queries
+    - Keep media files on disk, store metadata in DB
+
+[ ] Job queue (RQ + Redis, or Celery)
+    - Current: background asyncio tasks die if server restarts
+    - Need: persistent queue that survives restarts
+    - Redis is the only new dependency (tiny, fast)
+
+[ ] Rate limiting and retry on all scrapers
+    - Every HTTP request needs: exponential backoff, max retries, timeout
+    - Per-domain rate limits (don't hammer the same site)
+    - Currently this is inconsistent across modules
+
+[ ] Test suite
+    - At minimum: fixture-based tests for the pipeline (mock HTTP responses)
+    - Test the guidance/scoring logic (pure functions, easy to test)
+    - Test the PDF report generation
+
+================================================================================
+PHASE 7 — PUBLISHING (after Phase 0 + Phase 1 complete)
+          "Get it in front of people"
+================================================================================
+
+[ ] Docker Hub: push public image (authintify/authintify:latest)
+
+[ ] Demo video (3-4 minutes)
+    - Show: paste a viral tweet URL → watch the pipeline run →
+      show network graph → show guidance tab → open Authentify tab (authentify report)
+    - Use a publicly known misinfo case (something already reported by AltNews/Boom)
+    - This is the most important marketing asset
+
+[ ] Post on:
+    - Hacker News (Show HN — time for Tuesday morning US time)
+    - r/OSINT, r/netsec, r/india, r/pakistan
+    - Twitter/X OSINT community (search #OSINT, follow Bellingcat, DFRLab)
+    - OSINT Framework maintainer (might add your tool to the list)
+
+[ ] Apply to:
+    - Google News Initiative funding (they fund misinfo tools)
+    - DFRLab (Atlantic Council) — they sometimes partner with tool builders
+    - Meta Journalism Project
+
+================================================================================
+LATER / CONSIDER
+================================================================================
+
+[ ] Browser extension: right-click any image/tweet → "Investigate in Authentify"
+[ ] STIX 2.1 export (standard threat intel format — opens doors to enterprise)
+[ ] Multi-user / team mode with case assignment
+[ ] Webhook: POST results to your URL when investigation completes
+[ ] Mobile-responsive UI
+[ ] LLM narrative analysis: detect coordinated messaging across multiple posts
+    (same talking points, similar phrasing = possible coordination)
+[ ] Satellite imagery: if GPS coordinates found, show Google Earth view of location
+[ ] Voice biometrics: match speaker across multiple audio clips
+    (is this the same person speaking in different viral clips?)
+
+================================================================================
+CURRENT TOOL STATUS — authintify (as of May 2026)
+================================================================================
+Already working:
+  - URL investigation (Twitter/X, Instagram, Reddit, TikTok, YouTube, Telegram)
+  - Image/video upload + keyframe selection
+  - Sherlock username enumeration (400+ platforms)
+  - Dark web: BreachDirectory, DarkSearch, Ahmia, Tor .onion engines
+  - Media: download, EXIF, GPS, SHA256, OCR, reverse image search (SerpAPI)
+  - Identity: HIBP, Dehashed, Gravatar (basic)
+  - Claude vision: image analysis, deepfake detection
+  - Network graph (force-directed, interactive) — single investigation only, no social expansion
+  - Guidance engine with severity scoring
+  - Known accounts database (India/Pak focus, ~60 accounts)
+  - Authentify tab: button → loads PDF (currently sample PDF, not real report)
+
+Key gaps vs. goal:
+  - Audio input: MISSING entirely
+  - Email investigation: basic (HIBP only) — needs Holehe
+  - Phone investigation: MISSING — needs PhoneInfoga
+  - Face reverse search: MISSING — needs PimEyes/FaceCheck integration
+  - South Asia face index: MISSING — needs Scrapy + FAISS pipeline
+  - Domain/IP OSINT: MISSING
+  - WhatsApp/Telegram deep analysis: weak
+  - Network graph social expansion (depth 4): MISSING
+  - authintify investigation report (own PDF): MISSING
+  - Authentify deepfake report: placeholder only (API TBD)
+  - Docker: MISSING (barrier to anyone running this)

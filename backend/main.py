@@ -13,6 +13,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from backend.routes.cases import router as cases_router
+from backend.authentify.routes import router as authentify_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,6 +37,7 @@ app.add_middleware(
 )
 
 app.include_router(cases_router, prefix="/api")
+app.include_router(authentify_router, prefix="/api")
 
 
 @app.get("/api/health")

@@ -165,6 +165,22 @@ def parse_url(url: str) -> ParsedURL:
                 if m:
                     post_id = m.group(1)
 
+    elif platform == "linkedin":
+        # Post URL: /posts/{username}_{slug}-{activity_id}-{share_code}/
+        m = re.search(
+            r"linkedin\.com/posts/([^/?#_]+)_.*?-(\d{15,})-[A-Za-z0-9]+",
+            url, re.IGNORECASE,
+        )
+        if m:
+            username = m.group(1)
+            post_id = m.group(2)
+            normalized = url.split("?")[0].rstrip("/") + "/"
+        else:
+            m = re.search(r"linkedin\.com/in/([^/?#]+)", url, re.IGNORECASE)
+            if m:
+                username = m.group(1).rstrip("/")
+                is_profile = True
+
     elif platform == "telegram":
         m = re.search(r"t(?:elegram)?\.me/([^/?#]+)/(\d+)", url)
         if m:

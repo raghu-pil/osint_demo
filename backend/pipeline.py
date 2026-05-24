@@ -164,7 +164,11 @@ def run_pipeline(case_id: str, manager: CaseManager):
         osint_report = None
         try:
             from osint.main import run as osint_run
-            osint_report = osint_run(case.url, config, verbose=False)
+            # Skip Sherlock + dark web here — the pipeline runs them in dedicated
+            # steps below so they show their own progress labels instead of
+            # blocking this step for 60-90 seconds.
+            scrape_config = {**config, "skip_sherlock": True, "skip_darkweb": True}
+            osint_report = osint_run(case.url, scrape_config, verbose=False)
             from osint.output.formatter import report_to_dict
             report_dict = report_to_dict(osint_report)
 
@@ -342,17 +346,19 @@ def run_pipeline(case_id: str, manager: CaseManager):
         else:
             manager.step_skip(case, "cross_posts", "Disabled in config")
 
-        # ── Step 5: Username search ───────────────────────────────────────────
+        # ── Step 5: Username search (Sherlock) ───────────────────────────────
         if not config.get("skip_sherlock"):
             manager.step_start(case, "username")
             _log(case, "Scanning 400+ social platforms for this username (this may take 1–2 minutes)…")
             manager.save(case)
             try:
-                if osint_report:
-                    from osint.output.formatter import report_to_dict
-                    cp = report_to_dict(osint_report).get("cross_platform", {})
-                    case.username_search = cp.get("username_found_on") or []
-                    manager.step_done(case, "username", f"Found on {len(case.username_search)} platforms")
+                uname = ((case.account or {}).get("username")
+                         or (case.post or {}).get("author_username"))
+                if uname:
+                    from osint.intelligence.sherlock_runner import run_sherlock
+                    results = run_sherlock(uname, timeout=config.get("sherlock_timeout", 60))
+                    case.username_search = results
+                    manager.step_done(case, "username", f"Found on {len(results)} platforms")
                 else:
                     manager.step_skip(case, "username", "No username to search")
             except Exception as e:

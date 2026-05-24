@@ -3,6 +3,7 @@ from .reddit import RedditScraper
 from .instagram import InstagramScraper
 from .tiktok import TikTokScraper
 from .youtube import YouTubeScraper
+from .linkedin import LinkedInScraper
 
 REGISTRY = {
     "twitter": TwitterScraper,
@@ -10,6 +11,7 @@ REGISTRY = {
     "instagram": InstagramScraper,
     "tiktok": TikTokScraper,
     "youtube": YouTubeScraper,
+    "linkedin": LinkedInScraper,
 }
 
 

@@ -78,7 +78,12 @@ def run(url: str, config: dict, verbose: bool = False) -> OSINTReport:
 
     if scraper and parsed.post_id:
         try:
-            post, account = scraper.get_post_and_account(parsed.post_id, parsed.username)
+            # LinkedIn needs the original URL (slug can't be rebuilt from post_id alone)
+            if parsed.platform == "linkedin" and hasattr(scraper, "get_post_from_url"):
+                post = scraper.get_post_from_url(parsed.raw)
+                account = scraper.get_account(parsed.username) if parsed.username else None
+            else:
+                post, account = scraper.get_post_and_account(parsed.post_id, parsed.username)
             report.post = post
             report.account = account
         except Exception as e:

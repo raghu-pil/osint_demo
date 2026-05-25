@@ -1281,16 +1281,59 @@ function renderImageAnalysisCard(c) {
   return html;
 }
 
+function renderShareTrace(c) {
+  const st = c.share_trace;
+  if (!st || !st.platform) return '';
+
+  const conf = st.confidence || 'low';
+  const confColor = conf === 'high' ? 'var(--green,#2ea043)' : conf === 'medium' ? '#e3a000' : 'var(--text2)';
+  const confLabel = conf === 'high' ? 'High confidence' : conf === 'medium' ? 'Medium confidence' : 'Low confidence';
+  const platIcons = {discord:'🎮', github:'🐙', tiktok:'🎵', instagram:'📷', telegram:'✈️'};
+  const icon = platIcons[st.platform] || '🔗';
+
+  // Build identity rows
+  const rows = [];
+  if (st.sharer_username)    rows.push(['Username', `@${st.sharer_username}`]);
+  if (st.sharer_display_name) rows.push(['Name', st.sharer_display_name]);
+  if (st.sharer_email)       rows.push(['Email', st.sharer_email]);
+  if (st.sharer_user_id)     rows.push(['User ID', st.sharer_user_id]);
+  if (st.sharer_user_code)   rows.push(['User Code', st.sharer_user_code]);
+  if (st.creator_user_id)    rows.push(['Creator ID', String(st.creator_user_id)]);
+  if (st.share_method)       rows.push(['Share Method', st.share_method]);
+  if (st.share_source)       rows.push(['Share Source', st.share_source]);
+  if (st.committed_at)       rows.push(['Committed', st.committed_at]);
+  if (st.commit_message)     rows.push(['Commit Message', st.commit_message]);
+  if (st.guild_name)         rows.push(['Discord Server', st.guild_name + (st.channel_name ? ' #'+st.channel_name : '')]);
+  if (st.repository)         rows.push(['Repository', st.repository]);
+
+  const noIdentity = rows.length === 0;
+
+  return `<div class="card" style="border-left:3px solid ${confColor}">
+    <div class="card-title">${icon} Share Trace — Who Hit Share?</div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+      <span style="background:var(--bg3);padding:3px 10px;border-radius:3px;font-size:12px;text-transform:capitalize">${escHtml(st.platform)}</span>
+      <span style="font-size:12px;color:${confColor}">${confLabel}</span>
+    </div>
+    ${st.sharer_avatar ? `<img src="${escHtml(st.sharer_avatar)}" style="width:40px;height:40px;border-radius:50%;float:right;margin:0 0 8px 12px" onerror="this.style.display='none'">` : ''}
+    ${rows.length ? `<div class="kv">${rows.map(([k,v])=>`<span class="kv-key">${escHtml(k)}</span><span class="kv-val" style="font-family:monospace;font-size:12px">${escHtml(String(v))}</span>`).join('')}</div>` : ''}
+    ${noIdentity ? `<div style="font-size:13px;color:var(--text2)">Share token found but no identity extracted.</div>` : ''}
+    ${st.note ? `<div style="font-size:12px;color:var(--text2);margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">${escHtml(st.note)}</div>` : ''}
+    ${st.error ? `<div style="font-size:12px;color:#f85149;margin-top:6px">${escHtml(st.error)}</div>` : ''}
+    ${st.pivot_url ? `<div style="margin-top:10px"><a href="${escHtml(st.pivot_url)}" target="_blank" class="g-link">Open sharer profile ↗</a>${investBtn(st.pivot_url, st.sharer_username || 'sharer profile')}</div>` : ''}
+    ${st.resolved_url ? `<div style="margin-top:8px;font-size:11px"><a href="${escHtml(st.resolved_url)}" target="_blank" style="color:var(--text2)">Resolved URL ↗</a></div>` : ''}
+  </div>`;
+}
+
 function renderPost(c) {
   const p = c.post;
-  if (!p) return `<div style="color:var(--text2);padding:20px">No post data available. ${c.errors?.length?'Check errors in the Leads tab.':''}</div>`;
+  if (!p) return `${renderShareTrace(c)}<div style="color:var(--text2);padding:20px">No post data available. ${c.errors?.length?'Check errors in the Leads tab.':''}</div>`;
 
   const eng = p.engagement || {};
   const webMeta = p._web_meta;
 
   // Web page: show as article card
   if (p.platform === 'web' && webMeta) {
-    return `${renderImageAnalysisCard(c)}${renderIntelligence(c.post_intelligence)}
+    return `${renderShareTrace(c)}${renderImageAnalysisCard(c)}${renderIntelligence(c.post_intelligence)}
     <div class="card">
       <div class="card-title">Web Article</div>
       ${webMeta.image_url ? `<img src="${escHtml(webMeta.image_url)}" style="width:100%;max-height:260px;object-fit:cover;border-radius:4px;margin-bottom:12px;display:block" onerror="this.style.display='none'">` : ''}
@@ -1306,7 +1349,7 @@ function renderPost(c) {
     </div>`;
   }
 
-  return `${renderImageAnalysisCard(c)}${renderIntelligence(c.post_intelligence)}
+  return `${renderShareTrace(c)}${renderImageAnalysisCard(c)}${renderIntelligence(c.post_intelligence)}
     <div class="card">
       <div class="card-title">Post Content</div>
       ${p.text ? `<div style="font-size:14px;line-height:1.6;margin-bottom:14px;padding:12px;background:var(--bg);border-radius:4px">${escHtml(p.text)}</div>` : ''}

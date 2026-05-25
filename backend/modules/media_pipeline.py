@@ -668,7 +668,7 @@ def proactive_known_account_check(
 def run_media_investigation(
     file_path: str,
     api_key: str,
-    max_results: int = 15,
+    max_results: int = 50,
     anthropic_api_key: str = "",
 ) -> Dict[str, Any]:
     """

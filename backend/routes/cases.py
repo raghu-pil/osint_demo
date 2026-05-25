@@ -203,11 +203,11 @@ def run_reverse_search(case_id: str, req: ReverseSearchRequest):
         raise HTTPException(502, "Failed to upload to Catbox.moe")
 
     try:
-        gl = _search_google_lens(api_key, public_url, max_results=10)
+        gl = _search_google_lens(api_key, public_url)
     except RuntimeError as e:
         raise HTTPException(402, str(e))
     try:
-        yx = _search_yandex(api_key, public_url, max_results=10)
+        yx = _search_yandex(api_key, public_url)
     except RuntimeError as e:
         raise HTTPException(402, str(e))
     all_matches = gl + yx

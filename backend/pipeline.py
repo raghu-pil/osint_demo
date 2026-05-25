@@ -56,6 +56,7 @@ class CaseManager:
             updated_at=_now(),
             steps=[
                 _step("url_parse",       "URL Analysis"),
+                _step("share_trace",     "Share Token Decode"),
                 _step("scrape_post",     "Post Scraping"),
                 _step("account",         "Account Profile"),
                 _step("account_history", "Account Timeline & Enrichment"),
@@ -156,6 +157,43 @@ def run_pipeline(case_id: str, manager: CaseManager):
             case.errors.append(f"URL parse: {e}")
             manager.step_fail(case, "url_parse", str(e))
             parsed = None
+
+        # ── Step 1b: ShareTrace ───────────────────────────────────────────────
+        manager.step_start(case, "share_trace")
+        _log(case, "Checking for share tracking tokens that identify who shared this link…")
+        manager.save(case)
+        try:
+            from backend.modules.share_trace import trace_share
+            from osint.core.utils import make_session as _make_session
+            _st_session = _make_session()
+            st = trace_share(case.url, session=_st_session)
+            case.share_trace = st if st else None
+            if st:
+                if st.get("sharer_username"):
+                    manager.step_done(case, "share_trace",
+                        f"Sharer: @{st['sharer_username']} ({st.get('platform','')})")
+                    _log(case, f"ShareTrace: identified sharer @{st['sharer_username']} on {st.get('platform','')}")
+                elif st.get("sharer_user_code"):
+                    manager.step_done(case, "share_trace",
+                        f"User code: {st['sharer_user_code']} ({st.get('platform','')})")
+                    _log(case, f"ShareTrace: sharer user code {st['sharer_user_code']} ({st.get('platform','')})")
+                elif st.get("sharer_email"):
+                    manager.step_done(case, "share_trace",
+                        f"Author: {st['sharer_display_name']} <{st['sharer_email']}>")
+                    _log(case, f"ShareTrace: {st['sharer_display_name']} <{st['sharer_email']}>")
+                elif st.get("creator_user_id") or st.get("sharer_user_id"):
+                    uid = st.get("creator_user_id") or st.get("sharer_user_id")
+                    manager.step_done(case, "share_trace",
+                        f"User ID: {uid} ({st.get('platform','')})")
+                    _log(case, f"ShareTrace: user ID {uid} on {st.get('platform','')}")
+                else:
+                    manager.step_done(case, "share_trace",
+                        f"Partial data ({st.get('platform','?')})")
+            else:
+                manager.step_skip(case, "share_trace", "No share token recognised in URL")
+        except Exception as e:
+            case.errors.append(f"ShareTrace: {e}")
+            manager.step_fail(case, "share_trace", str(e))
 
         # ── Step 2: Scrape Post ───────────────────────────────────────────────
         manager.step_start(case, "scrape_post")
@@ -357,7 +395,10 @@ def run_pipeline(case_id: str, manager: CaseManager):
                 if uname:
                     from osint.intelligence.sherlock_runner import run_sherlock
                     results = run_sherlock(uname, timeout=config.get("sherlock_timeout", 60))
-                    case.username_search = results
+                    case.username_search = [
+                        r.model_dump() if hasattr(r, "model_dump") else dict(r)
+                        for r in results
+                    ]
                     manager.step_done(case, "username", f"Found on {len(results)} platforms")
                 else:
                     manager.step_skip(case, "username", "No username to search")

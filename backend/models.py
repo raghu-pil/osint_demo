@@ -181,6 +181,9 @@ class Case(BaseModel):
     # LLM intelligence summary (populated for both URL and media investigations)
     post_intelligence: Optional[Dict[str, Any]] = None
 
+    # ShareTrace — who shared/forwarded this link
+    share_trace: Optional[Dict[str, Any]] = None
+
     # Media-first investigation results
     discovered_accounts: List[Dict[str, Any]] = []
     media_investigation: Optional[Dict[str, Any]] = None

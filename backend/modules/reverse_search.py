@@ -200,7 +200,7 @@ def _check_serpapi_error(result: dict) -> None:
     raise RuntimeError(f"SerpAPI error: {err}")
 
 
-def _search_google_lens(api_key: str, image_url: str, max_results: int = 10) -> List[Dict]:
+def _search_google_lens(api_key: str, image_url: str, max_results: int = 50) -> List[Dict]:
     matches = []
     try:
         from serpapi import GoogleSearch
@@ -228,7 +228,7 @@ def _search_google_lens(api_key: str, image_url: str, max_results: int = 10) -> 
     return matches
 
 
-def _search_yandex(api_key: str, image_url: str, max_results: int = 10) -> List[Dict]:
+def _search_yandex(api_key: str, image_url: str, max_results: int = 50) -> List[Dict]:
     matches = []
     try:
         from serpapi import GoogleSearch
@@ -285,7 +285,7 @@ def _search_yandex(api_key: str, image_url: str, max_results: int = 10) -> List[
     return matches
 
 
-def _search_bing_visual(api_key: str, image_url: str, max_results: int = 10) -> List[Dict]:
+def _search_bing_visual(api_key: str, image_url: str, max_results: int = 50) -> List[Dict]:
     """Bing Visual Search via SerpAPI."""
     matches = []
     try:
@@ -312,7 +312,7 @@ def search_image(
     image_path: str,
     api_key: str,
     engines: List[str] = None,
-    max_results: int = 10,
+    max_results: int = 50,
 ) -> Dict[str, Any]:
     """
     Run reverse image search on a local file via SerpAPI.
@@ -372,7 +372,7 @@ def run_reverse_search_for_media(
     media_file,
     api_key: str,
     case_dir: str,
-    max_results: int = 10,
+    max_results: int = 50,
 ) -> Dict[str, Any]:
     """
     Run reverse search for a media file (image or video).

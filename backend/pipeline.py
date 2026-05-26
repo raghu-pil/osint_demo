@@ -390,21 +390,21 @@ def run_pipeline(case_id: str, manager: CaseManager):
         _log(case, "Searching for retweets, quote-tweets, and cross-platform shares…")
         manager.save(case)
         try:
-            if case.post and case.platform in ("twitter", "x"):
+            if case.post:
                 from backend.modules.repost_tracker import find_reposts
                 rp = find_reposts(case.post, config)
                 case.repost_tracker = rp
                 total = rp.get("total", 0)
                 parts = []
                 if rp.get("retweeters"):    parts.append(f"{len(rp['retweeters'])} retweeters")
-                if rp.get("quote_tweets"):  parts.append(f"{len(rp['quote_tweets'])} quote-tweets")
+                if rp.get("quote_tweets"):  parts.append(f"{len(rp['quote_tweets'])} X shares")
                 if rp.get("web_shares"):    parts.append(f"{len(rp['web_shares'])} web shares")
                 summary = ", ".join(parts) if parts else "none found"
                 if total:
-                    _log(case, f"Repost tracker: {summary}")
-                manager.step_done(case, "repost_tracker", summary if total else "No reposts found")
+                    _log(case, f"Share tracker: {summary}")
+                manager.step_done(case, "repost_tracker", summary if total else "No shares found")
             else:
-                manager.step_skip(case, "repost_tracker", "Only supported for Twitter/X posts")
+                manager.step_skip(case, "repost_tracker", "No post data")
         except Exception as e:
             case.errors.append(f"Repost tracker: {e}")
             manager.step_fail(case, "repost_tracker", str(e))

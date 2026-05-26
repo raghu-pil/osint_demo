@@ -1,17 +1,24 @@
 """
-Repost / retweet tracker for Twitter/X URLs.
+Repost / share tracker — works for any platform URL.
 
-Four complementary sources:
-  1. Twitter API v2 recent search — url: operator finds quote tweets (needs bearer token)
-  2. Nitter /retweets page — silent retweeters (username list, no comment)
-  3. Nitter search — finds posts quoting this URL on Nitter instances
-  4. SerpAPI Google search — quote tweets and cross-platform web shares
+Sources used:
+  Twitter/X posts:
+    1. Twitter API v2 retweeted_by + quote_tweets  (needs Basic plan or user OAuth)
+    2. Nitter /retweets page                        (fallback, often down)
+    3. Nitter search                                (fallback)
+    4. SerpAPI Google — URL string search           (web shares + X quote tweets)
 
-Returns a structured dict with:
-  retweeters   : list of {username, display_name, profile_url}  (Nitter)
-  quote_tweets : list of {username, tweet_url, snippet, source} (Twitter API / SerpAPI)
-  web_shares   : list of {title, url, source, snippet}          (SerpAPI, non-Twitter)
-  manual_links : search URLs the investigator can open directly
+  All other platforms (Instagram, Facebook, YouTube, TikTok, …):
+    1. SerpAPI Google — URL string search           (web shares)
+    2. Manual links: X url: search + Google search
+
+Returns:
+  retweeters   : [{username, profile_url, source}]
+  quote_tweets : [{username, tweet_url, snippet, source, created_at, metrics}]
+  web_shares   : [{title, url, source, snippet}]
+  manual_links : {key: url}
+  total        : int
+  twitter_api_warning : str | None
 """
 import re
 import logging
@@ -49,7 +56,6 @@ class TwitterAPIError(Exception):
 
 
 def _twitter_get(path: str, bearer_token: str, params: Dict) -> Dict:
-    """Make a Twitter API v2 GET request, raising TwitterAPIError on auth/tier failures."""
     r = requests.get(
         f"https://api.twitter.com/2/{path}",
         headers={"Authorization": f"Bearer {bearer_token}"},
@@ -57,12 +63,12 @@ def _twitter_get(path: str, bearer_token: str, params: Dict) -> Dict:
         timeout=15,
     )
     if r.status_code in (401, 403):
-        raise TwitterAPIError(f"Twitter API auth error ({r.status_code}): invalid token")
+        raise TwitterAPIError(f"Twitter API auth error ({r.status_code}): invalid or app-only token — user OAuth required")
     if r.status_code == 402:
         err = r.json() if r.text else {}
         raise TwitterAPIError(
-            f"Twitter API tier too low ({err.get('title','CreditsDepleted')}): "
-            "Basic plan ($100/mo) required for these endpoints. "
+            f"Twitter API tier too low ({err.get('title', 'CreditsDepleted')}): "
+            "Basic plan ($100/mo) or user OAuth token required. "
             "Use the manual X search link below to find reposts."
         )
     if r.status_code == 429:
@@ -73,9 +79,6 @@ def _twitter_get(path: str, bearer_token: str, params: Dict) -> Dict:
 
 
 def _twitter_api_retweeted_by(tweet_id: str, bearer_token: str) -> List[Dict]:
-    """GET /2/tweets/:id/retweeted_by — users who plain-retweeted."""
-    if not bearer_token:
-        return []
     data = _twitter_get(
         f"tweets/{tweet_id}/retweeted_by",
         bearer_token,
@@ -89,14 +92,11 @@ def _twitter_api_retweeted_by(tweet_id: str, bearer_token: str) -> List[Dict]:
             "profile_url": f"https://x.com/{uname}",
             "source":      "twitter_api_v2",
         })
-    logger.info("Twitter API retweeted_by: %d retweeters", len(results))
+    logger.info("Twitter API retweeted_by: %d", len(results))
     return results
 
 
 def _twitter_api_quote_tweets(tweet_id: str, bearer_token: str) -> List[Dict]:
-    """GET /2/tweets/:id/quote_tweets — quote tweets."""
-    if not bearer_token:
-        return []
     data = _twitter_get(
         f"tweets/{tweet_id}/quote_tweets",
         bearer_token,
@@ -123,15 +123,14 @@ def _twitter_api_quote_tweets(tweet_id: str, bearer_token: str) -> List[Dict]:
             "created_at": t.get("created_at", ""),
             "metrics":    t.get("public_metrics", {}),
         })
-    logger.info("Twitter API quote_tweets: %d found", len(results))
+    logger.info("Twitter API quote_tweets: %d", len(results))
     return results
 
 
-# ── Nitter retweeters ─────────────────────────────────────────────────────────
+# ── Nitter ────────────────────────────────────────────────────────────────────
 
 def _fetch_nitter_retweeters(username: str, tweet_id: str,
                               nitter_base: str = "") -> List[Dict]:
-    """Scrape the /retweets page of a Nitter instance."""
     instances = ([nitter_base] if nitter_base else []) + _NITTER_INSTANCES
     for base in instances:
         url = f"{base.rstrip('/')}/{username}/status/{tweet_id}/retweets"
@@ -151,44 +150,36 @@ def _fetch_nitter_retweeters(username: str, tweet_id: str,
                         "profile_url": f"https://x.com/{handle}",
                         "source":      "nitter_retweets",
                     })
-            seen = set()
-            unique = []
+            seen, unique = set(), []
             for item in retweeters:
                 k = item["username"].lower()
                 if k not in seen:
                     seen.add(k)
                     unique.append(item)
             if unique or r.status_code == 200:
-                logger.info("Nitter %s returned %d retweeters", base, len(unique))
+                logger.info("Nitter %s: %d retweeters", base, len(unique))
                 return unique
         except Exception as e:
             logger.debug("Nitter %s failed: %s", base, e)
     return []
 
 
-# ── Nitter search ─────────────────────────────────────────────────────────────
-
 def _nitter_search_quotes(username: str, tweet_id: str,
                            nitter_base: str = "") -> List[Dict]:
-    """Search Nitter for tweets that link to this tweet URL."""
     instances = ([nitter_base] if nitter_base else []) + _NITTER_INSTANCES
     tweet_url_path = f"{username}/status/{tweet_id}"
-
     for base in instances:
         search_url = f"{base.rstrip('/')}/search?q={quote_plus(tweet_url_path)}&f=tweets"
         try:
             r = requests.get(search_url, headers=_HEADERS, timeout=12, allow_redirects=True)
             if r.status_code != 200:
                 continue
-
             results = []
-            # Each tweet result has a timeline-item with a tweet-link
             for m in re.finditer(
                 r'href="/([A-Za-z0-9_]+)/status/(\d+)"[^>]*class="[^"]*tweet-link',
                 r.text,
             ):
-                uname = m.group(1)
-                tid   = m.group(2)
+                uname, tid = m.group(1), m.group(2)
                 if (uname.lower() not in _SKIP_HANDLES
                         and uname.lower() != username.lower()
                         and tid != tweet_id):
@@ -199,19 +190,15 @@ def _nitter_search_quotes(username: str, tweet_id: str,
                         "snippet":   "",
                         "source":    "nitter_search",
                     })
-
-            seen = set()
-            unique = []
+            seen, unique = set(), []
             for item in results:
                 k = item["tweet_id"]
                 if k not in seen:
                     seen.add(k)
                     unique.append(item)
-
             if unique:
-                logger.info("Nitter search %s found %d quote tweets", base, len(unique))
+                logger.info("Nitter search %s: %d quotes", base, len(unique))
                 return unique
-            # If we got a 200 but no results, still stop (instance is alive, no results)
             if r.status_code == 200:
                 return []
         except Exception as e:
@@ -219,14 +206,14 @@ def _nitter_search_quotes(username: str, tweet_id: str,
     return []
 
 
-# ── SerpAPI quote tweets + web shares ────────────────────────────────────────
+# ── SerpAPI web search ────────────────────────────────────────────────────────
 
-def _search_reposts(tweet_url: str, username: str, tweet_id: str,
-                    serpapi_key: str, max_results: int = 20) -> Dict:
+def _serpapi_url_search(post_url: str, exclude_own_domain: str,
+                        serpapi_key: str, max_results: int = 20) -> Dict:
     """
-    Search Google via SerpAPI for:
-     - Quote tweets (site:x.com linking to this tweet's URL path)
-     - Web shares (any non-X page referencing this tweet)
+    Search Google for references to post_url.
+    Results from the same domain as the post are classified as quote_tweets
+    (for X) or ignored; everything else is a web_share.
     """
     quote_tweets: List[Dict] = []
     web_shares:   List[Dict] = []
@@ -240,35 +227,33 @@ def _search_reposts(tweet_url: str, username: str, tweet_id: str,
         return {"quote_tweets": quote_tweets, "web_shares": web_shares,
                 "error": "serpapi not installed"}
 
-    short_url = f"x.com/{username}/status/{tweet_id}"
+    # Strip scheme for the search query so both http/https variants match
+    clean_url = re.sub(r'^https?://(www\.)?', '', post_url).rstrip('/')
+    query = f'"{clean_url}"'
 
-    queries = [
-        # Any site (including X) referencing this tweet URL — catches quote tweets + web shares
-        (f'"{short_url}"', "any"),
-    ]
+    try:
+        results = GoogleSearch({
+            "engine": "google",
+            "q": query,
+            "api_key": serpapi_key,
+            "num": max_results,
+        }).get_dict()
 
-    seen_links: set = set()
+        seen_links: set = set()
+        for item in results.get("organic_results", []):
+            link    = item.get("link", "")
+            title   = item.get("title", "")
+            snippet = item.get("snippet", "")
+            source  = item.get("source", "") or _domain(link)
 
-    for query, _ in queries:
-        try:
-            results = GoogleSearch({
-                "engine": "google",
-                "q": query,
-                "api_key": serpapi_key,
-                "num": max_results,
-            }).get_dict()
+            if link in seen_links:
+                continue
+            seen_links.add(link)
 
-            for item in results.get("organic_results", []):
-                link    = item.get("link", "")
-                title   = item.get("title", "")
-                snippet = item.get("snippet", "")
-                source  = item.get("source", "") or _domain(link)
+            link_domain = _domain(link)
 
-                if link in seen_links:
-                    continue
-                seen_links.add(link)
-
-                # Classify: is this an X/Twitter post or an external web page?
+            # X/Twitter result → classify as quote tweet
+            if re.search(r'(twitter|x)\.com', link_domain):
                 m = re.search(
                     r'(?:twitter|x)\.com/([A-Za-z0-9_]{1,50})/status/(\d+)',
                     link,
@@ -276,9 +261,10 @@ def _search_reposts(tweet_url: str, username: str, tweet_id: str,
                 if m:
                     uname = m.group(1)
                     tid   = m.group(2)
+                    # Exclude the original tweet and reserved handles
+                    orig_tid = re.search(r'/status/(\d+)', post_url)
                     if (uname.lower() not in _SKIP_HANDLES
-                            and uname.lower() != username.lower()
-                            and tid != tweet_id):
+                            and (not orig_tid or tid != orig_tid.group(1))):
                         quote_tweets.append({
                             "username":  uname,
                             "tweet_url": link,
@@ -286,16 +272,16 @@ def _search_reposts(tweet_url: str, username: str, tweet_id: str,
                             "snippet":   snippet[:250],
                             "source":    "serpapi_google",
                         })
-                else:
-                    # Non-X page that references the tweet URL
-                    web_shares.append({
-                        "title":   title[:120],
-                        "url":     link,
-                        "source":  source,
-                        "snippet": snippet[:250],
-                    })
-        except Exception as e:
-            logger.warning("SerpAPI repost search failed: %s", e)
+            else:
+                web_shares.append({
+                    "title":   title[:120],
+                    "url":     link,
+                    "source":  source,
+                    "snippet": snippet[:250],
+                })
+
+    except Exception as e:
+        logger.warning("SerpAPI url search failed: %s", e)
 
     return {"quote_tweets": quote_tweets, "web_shares": web_shares}
 
@@ -307,18 +293,43 @@ def _domain(url: str) -> str:
         return ""
 
 
-# ── Merge + deduplicate quote tweets across sources ───────────────────────────
+# ── Manual links by platform ──────────────────────────────────────────────────
 
-def _merge_quote_tweets(lists: List[List[Dict]], exclude_username: str) -> List[Dict]:
-    seen_tids: set = set()
+def _manual_links(post_url: str, platform: str,
+                  username: str = "", tweet_id: str = "") -> Dict[str, str]:
+    """Build relevant manual search links for the given platform."""
+    links: Dict[str, str] = {}
+
+    # X url: search works for ANY URL (finds X posts that link to it)
+    links["x_url_search"] = (
+        f"https://x.com/search?q={quote_plus('url:' + post_url)}"
+        f"&src=typed_query&f=live"
+    )
+
+    # Google search for the URL
+    clean = re.sub(r'^https?://(www\.)?', '', post_url).rstrip('/')
+    links["google_search"] = f"https://www.google.com/search?q={quote_plus(clean)}"
+
+    # Platform-specific extras
+    if platform in ("twitter", "x") and tweet_id:
+        links["x_quote_search"] = (
+            f"https://x.com/search?q={quote_plus(username + '/status/' + tweet_id)}"
+            f"&src=typed_query&f=live"
+        )
+
+    return links
+
+
+# ── Merge + deduplicate ───────────────────────────────────────────────────────
+
+def _merge_quote_tweets(lists: List[List[Dict]], exclude_tid: str = "") -> List[Dict]:
+    seen: set = set()
     merged = []
     for lst in lists:
         for item in lst:
-            tid = item.get("tweet_id", "")
-            uname = item.get("username", "").lower()
-            key = tid or item.get("tweet_url", "")
-            if key and key not in seen_tids and uname != exclude_username.lower():
-                seen_tids.add(key)
+            key = item.get("tweet_id") or item.get("tweet_url", "")
+            if key and key not in seen and key != exclude_tid:
+                seen.add(key)
                 merged.append(item)
     return merged
 
@@ -327,111 +338,111 @@ def _merge_quote_tweets(lists: List[List[Dict]], exclude_username: str) -> List[
 
 def find_reposts(post: Dict, config: Dict) -> Dict[str, Any]:
     """
-    Find who retweeted / quote-tweeted / shared a Twitter/X post.
-
-    post   : case.post dict (needs platform, post_id, author_username, url)
-    config : app config dict (serpapi_api_key, nitter_instance, twitter_bearer_token)
+    Find who shared / retweeted / quoted a post.
+    Works for any platform; Twitter/X gets additional native API sources.
     """
     result: Dict[str, Any] = {
-        "retweeters":   [],
-        "quote_tweets": [],
-        "web_shares":   [],
-        "manual_links": {},
-        "total":        0,
-        "error":        None,
+        "retweeters":          [],
+        "quote_tweets":        [],
+        "web_shares":          [],
+        "manual_links":        {},
+        "total":               0,
+        "error":               None,
+        "twitter_api_warning": None,
+        "platform":            None,
     }
 
     if not post:
         return result
 
-    platform = (post.get("platform") or "").lower()
-    if platform not in ("twitter", "x"):
-        result["error"] = f"Repost tracking only supported for Twitter/X (got: {platform})"
-        return result
-
-    tweet_id  = post.get("post_id") or post.get("id") or ""
+    platform  = (post.get("platform") or "").lower()
+    post_url  = post.get("url") or ""
     username  = post.get("author_username") or ""
-    tweet_url = post.get("url") or f"https://x.com/{username}/status/{tweet_id}"
+    tweet_id  = post.get("post_id") or post.get("id") or ""
 
-    if not tweet_id or not username:
-        result["error"] = "Missing tweet_id or username"
+    if not post_url:
+        result["error"] = "No post URL available"
         return result
 
-    result["manual_links"] = {
-        "twitter_search": f"https://x.com/search?q={quote_plus('url:' + tweet_url)}&src=typed_query&f=live",
-        "google_quotes":  f"https://www.google.com/search?q={quote_plus(username + '/status/' + tweet_id + ' site:x.com')}",
-    }
+    result["platform"] = platform
+    result["manual_links"] = _manual_links(post_url, platform, username, tweet_id)
 
     bearer_token = config.get("twitter_bearer_token", "")
     serpapi_key  = config.get("serpapi_api_key", "")
     nitter_base  = config.get("nitter_instance", "")
 
-    # 1a. Twitter API v2 retweeters (needs user-context OAuth, not app-only bearer)
+    # ── Twitter/X-specific sources ────────────────────────────────────────────
     api_ok = False
-    if bearer_token:
-        try:
-            result["retweeters"] = _twitter_api_retweeted_by(tweet_id, bearer_token)
-            api_ok = True
-        except TwitterAPIError as e:
-            result["twitter_api_warning"] = str(e)
-            logger.warning("Twitter API retweeted_by: %s", e)
-        except Exception as e:
-            logger.warning("Twitter API retweeted_by failed: %s", e)
+    if platform in ("twitter", "x") and tweet_id:
 
-    # 1b. Twitter API v2 quote tweets
-    api_quotes: List[Dict] = []
-    if bearer_token and api_ok:
-        try:
-            api_quotes = _twitter_api_quote_tweets(tweet_id, bearer_token)
-        except TwitterAPIError as e:
-            result["twitter_api_warning"] = str(e)
-            logger.warning("Twitter API quote_tweets: %s", e)
-        except Exception as e:
-            logger.warning("Twitter API quote_tweets failed: %s", e)
+        # Twitter API v2 retweeters
+        if bearer_token:
+            try:
+                result["retweeters"] = _twitter_api_retweeted_by(tweet_id, bearer_token)
+                api_ok = True
+            except TwitterAPIError as e:
+                result["twitter_api_warning"] = str(e)
+                logger.warning("Twitter API retweeted_by: %s", e)
+            except Exception as e:
+                logger.warning("Twitter API retweeted_by failed: %s", e)
 
-    # 2. Nitter retweeters (fallback when Twitter API unavailable)
-    if not api_ok:
-        try:
-            result["retweeters"] = _fetch_nitter_retweeters(username, tweet_id, nitter_base)
-        except Exception as e:
-            logger.warning("Nitter retweet fetch failed: %s", e)
+        # Twitter API v2 quote tweets
+        api_quotes: List[Dict] = []
+        if bearer_token and api_ok:
+            try:
+                api_quotes = _twitter_api_quote_tweets(tweet_id, bearer_token)
+            except TwitterAPIError as e:
+                result["twitter_api_warning"] = str(e)
+                logger.warning("Twitter API quote_tweets: %s", e)
+            except Exception as e:
+                logger.warning("Twitter API quote_tweets failed: %s", e)
 
-    # 3. Nitter search for quote tweets (fallback when Twitter API unavailable)
-    nitter_quotes: List[Dict] = []
-    if not api_ok:
-        try:
-            nitter_quotes = _nitter_search_quotes(username, tweet_id, nitter_base)
-        except Exception as e:
-            logger.warning("Nitter quote search failed: %s", e)
+        # Nitter fallback
+        if not api_ok:
+            try:
+                result["retweeters"] = _fetch_nitter_retweeters(username, tweet_id, nitter_base)
+            except Exception as e:
+                logger.warning("Nitter retweet fetch failed: %s", e)
 
-    # 4. SerpAPI quote tweets + web shares
-    serp_quotes: List[Dict] = []
-    if serpapi_key:
-        try:
-            serpapi_result = _search_reposts(tweet_url, username, tweet_id, serpapi_key)
-            serp_quotes               = serpapi_result.get("quote_tweets", [])
-            result["web_shares"]      = serpapi_result.get("web_shares", [])
-            if serpapi_result.get("error"):
-                result["error"] = serpapi_result["error"]
-        except Exception as e:
-            logger.warning("SerpAPI repost search failed: %s", e)
+        nitter_quotes: List[Dict] = []
+        if not api_ok:
+            try:
+                nitter_quotes = _nitter_search_quotes(username, tweet_id, nitter_base)
+            except Exception as e:
+                logger.warning("Nitter quote search failed: %s", e)
 
-    # Merge all quote tweet sources, deduplicating by tweet_id
-    result["quote_tweets"] = _merge_quote_tweets(
-        [api_quotes, nitter_quotes, serp_quotes], username
-    )
+        # SerpAPI for X
+        serp_result: Dict = {}
+        if serpapi_key:
+            try:
+                serp_result = _serpapi_url_search(post_url, "x.com", serpapi_key)
+                result["web_shares"] = serp_result.get("web_shares", [])
+            except Exception as e:
+                logger.warning("SerpAPI search failed: %s", e)
+
+        serp_quotes = serp_result.get("quote_tweets", [])
+        result["quote_tweets"] = _merge_quote_tweets(
+            [api_quotes, nitter_quotes, serp_quotes], tweet_id
+        )
+
+    # ── All other platforms ───────────────────────────────────────────────────
+    else:
+        if serpapi_key:
+            try:
+                serp_result = _serpapi_url_search(post_url, _domain(post_url), serpapi_key)
+                # For non-X platforms, X results that reference the URL are still useful
+                # but label them as "X shares" rather than "quote tweets"
+                x_shares = serp_result.get("quote_tweets", [])
+                for s in x_shares:
+                    s["type"] = "x_share"
+                result["quote_tweets"] = x_shares   # shown in "X Shares" section
+                result["web_shares"]   = serp_result.get("web_shares", [])
+            except Exception as e:
+                logger.warning("SerpAPI search failed: %s", e)
 
     result["total"] = (
         len(result["retweeters"])
         + len(result["quote_tweets"])
         + len(result["web_shares"])
     )
-
-    sources = []
-    if api_quotes:    sources.append(f"Twitter API ({len(api_quotes)})")
-    if nitter_quotes: sources.append(f"Nitter search ({len(nitter_quotes)})")
-    if serp_quotes:   sources.append(f"SerpAPI ({len(serp_quotes)})")
-    if sources:
-        result["quote_tweet_sources"] = sources
-
     return result

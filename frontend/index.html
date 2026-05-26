@@ -1305,13 +1305,18 @@ function renderImageAnalysisCard(c) {
 function renderRepostTracker(c) {
   const rt = c.repost_tracker;
   if (!rt) return '';
-  const total = rt.total || 0;
-  const retweeters   = rt.retweeters   || [];
-  const quoteTweets  = rt.quote_tweets || [];
-  const webShares    = rt.web_shares   || [];
-  const manualLinks  = rt.manual_links || {};
+  const total       = rt.total || 0;
+  const retweeters  = rt.retweeters   || [];
+  const quoteTweets = rt.quote_tweets || [];
+  const webShares   = rt.web_shares   || [];
+  const manualLinks = rt.manual_links || {};
+  const platform    = rt.platform || c.platform || '';
+  const isTwitter   = platform === 'twitter' || platform === 'x';
 
   if (!total && !Object.keys(manualLinks).length) return '';
+
+  // Section header: "Quote Tweets" for X, "X Shares" for other platforms
+  const qtLabel = isTwitter ? 'Quote Tweets' : 'X Shares (posts on X linking this URL)';
 
   let html = `<div class="card">
     <div class="card-title">🔁 Reposts &amp; Shares${total ? ` — ${total} found` : ''}</div>`;
@@ -1320,7 +1325,7 @@ function renderRepostTracker(c) {
     html += `<div style="font-size:12px;color:var(--text2)">${escHtml(rt.error)}</div>`;
   }
 
-  // Silent retweeters (Nitter)
+  // Silent retweeters (Twitter/X only)
   if (retweeters.length) {
     html += `<div style="margin-bottom:14px">
       <div style="font-size:12px;font-weight:600;color:#1d9bf0;margin-bottom:8px;border-bottom:1px solid var(--border);padding-bottom:4px">
@@ -1336,18 +1341,18 @@ function renderRepostTracker(c) {
     html += '</div></div>';
   }
 
-  // Quote tweets
+  // Quote tweets / X shares
   if (quoteTweets.length) {
     html += `<div style="margin-bottom:14px">
       <div style="font-size:12px;font-weight:600;color:#1d9bf0;margin-bottom:8px;border-bottom:1px solid var(--border);padding-bottom:4px">
-        Quote Tweets — ${quoteTweets.length} found
+        ${qtLabel} — ${quoteTweets.length} found
       </div>`;
     for (const qt of quoteTweets) {
       const srcLabel = {'twitter_api_v2':'Twitter API','nitter_search':'Nitter','serpapi_google':'Google'}[qt.source] || qt.source || '';
       html += `<div style="padding:8px 0;border-bottom:1px solid var(--border)">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
           <a href="https://x.com/${escHtml(qt.username)}" target="_blank" style="color:var(--accent2);font-weight:600;font-size:13px">@${escHtml(qt.username)}</a>
-          <a href="${escHtml(qt.tweet_url)}" target="_blank" style="color:var(--text2);font-size:11px">View tweet ↗</a>
+          <a href="${escHtml(qt.tweet_url)}" target="_blank" style="color:var(--text2);font-size:11px">View on X ↗</a>
           ${srcLabel ? `<span style="font-size:10px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;padding:1px 5px;color:var(--text2)">${escHtml(srcLabel)}</span>` : ''}
           ${qt.metrics?.retweet_count ? `<span style="font-size:11px;color:var(--text2)">🔁 ${qt.metrics.retweet_count}</span>` : ''}
           ${qt.metrics?.like_count ? `<span style="font-size:11px;color:var(--text2)">❤ ${qt.metrics.like_count}</span>` : ''}
@@ -1360,7 +1365,7 @@ function renderRepostTracker(c) {
     html += '</div>';
   }
 
-  // Web shares (non-Twitter)
+  // Web shares
   if (webShares.length) {
     html += `<div style="margin-bottom:14px">
       <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:8px;border-bottom:1px solid var(--border);padding-bottom:4px">
@@ -1379,28 +1384,32 @@ function renderRepostTracker(c) {
   // Twitter API tier warning
   if (rt.twitter_api_warning) {
     html += `<div style="background:rgba(255,170,0,.08);border:1px solid rgba(255,170,0,.3);border-radius:4px;padding:8px 10px;margin-bottom:10px;font-size:11px;color:#ffaa00">
-      ⚠ Twitter API: ${escHtml(rt.twitter_api_warning)}
+      ⚠ ${escHtml(rt.twitter_api_warning)}
     </div>`;
   }
 
-  // Manual search links — always shown, prominent when API unavailable
+  // Manual search links
   if (Object.keys(manualLinks).length) {
     const noAuto = !retweeters.length && !quoteTweets.length;
-    html += `<div style="border-top:1px solid var(--border);padding-top:10px;margin-top:4px">
-      ${noAuto ? `<div style="font-size:12px;color:var(--text2);margin-bottom:8px">Automated detection unavailable — use these links while logged into X to find reposts:</div>` : `<div style="font-size:11px;color:var(--text2);margin-bottom:6px">Search manually:</div>`}
-      <div style="display:flex;gap:8px;flex-wrap:wrap">`;
     const labels = {
-      twitter_search: '🔍 Search on X (open while logged in)',
-      google_quotes:  '🌐 Google search',
+      x_url_search:    '🔍 Find X posts sharing this URL',
+      x_quote_search:  '🔍 X Quote Search',
+      google_search:   '🌐 Google',
+      twitter_search:  '🔍 Find X posts sharing this URL',
+      google_quotes:   '🌐 Google',
     };
+    html += `<div style="border-top:1px solid var(--border);padding-top:10px;margin-top:4px">
+      ${noAuto ? `<div style="font-size:12px;color:var(--text2);margin-bottom:8px">Open while logged into X to find who shared this:</div>` : `<div style="font-size:11px;color:var(--text2);margin-bottom:6px">Search manually:</div>`}
+      <div style="display:flex;gap:8px;flex-wrap:wrap">`;
     for (const [k, url] of Object.entries(manualLinks)) {
-      const isX = k === 'twitter_search';
+      const isX = k.startsWith('x_') || k === 'twitter_search';
       html += `<a href="${escHtml(url)}" target="_blank" style="
         display:inline-flex;align-items:center;gap:4px;
         background:${isX ? 'rgba(29,155,240,.15)' : 'var(--bg3)'};
         border:1px solid ${isX ? 'rgba(29,155,240,.4)' : 'var(--border)'};
-        border-radius:4px;padding:5px 10px;font-size:12px;color:${isX ? '#1d9bf0' : 'var(--text2)'};
-        text-decoration:none" target="_blank">${labels[k]||k} ↗</a>`;
+        border-radius:4px;padding:5px 10px;font-size:12px;
+        color:${isX ? '#1d9bf0' : 'var(--text2)'};text-decoration:none">
+        ${labels[k] || k} ↗</a>`;
     }
     html += '</div></div>';
   }
@@ -1461,7 +1470,7 @@ function renderPost(c) {
 
   // Web page: show as article card
   if (p.platform === 'web' && webMeta) {
-    return `${renderShareTrace(c)}${renderImageAnalysisCard(c)}${renderIntelligence(c.post_intelligence)}
+    return `${renderShareTrace(c)}${renderImageAnalysisCard(c)}${renderIntelligence(c.post_intelligence)}${renderRepostTracker(c)}
     <div class="card">
       <div class="card-title">Web Article</div>
       ${webMeta.image_url ? `<img src="${escHtml(webMeta.image_url)}" style="width:100%;max-height:260px;object-fit:cover;border-radius:4px;margin-bottom:12px;display:block" onerror="this.style.display='none'">` : ''}

@@ -7,6 +7,12 @@ if [ ! -f /app/config.yaml ]; then
     cp /app/config.yaml.example /app/config.yaml
 fi
 
+# Download spacy model if not already present (deferred from build to avoid network issues)
+python -c "import en_core_web_sm" 2>/dev/null || {
+    echo "[authintify] Downloading spacy model..."
+    python -m spacy download en_core_web_sm 2>/dev/null || echo "[authintify] spacy model unavailable — NER features disabled"
+}
+
 # Start Tor daemon (best-effort — dark web search degrades gracefully without it)
 service tor start 2>/dev/null || tor --RunAsDaemon 1 2>/dev/null || echo "[authintify] Tor not started — dark web search will be limited"
 

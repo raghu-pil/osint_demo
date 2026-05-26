@@ -16,8 +16,7 @@ WORKDIR /app
 # Install Python dependencies first (layer cached unless requirements change)
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt \
-    && python -m spacy download en_core_web_sm
+    && pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY backend/   backend/

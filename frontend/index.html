@@ -1302,6 +1302,90 @@ function renderImageAnalysisCard(c) {
   return html;
 }
 
+function renderRepostTracker(c) {
+  const rt = c.repost_tracker;
+  if (!rt) return '';
+  const total = rt.total || 0;
+  const retweeters   = rt.retweeters   || [];
+  const quoteTweets  = rt.quote_tweets || [];
+  const webShares    = rt.web_shares   || [];
+  const manualLinks  = rt.manual_links || {};
+
+  if (!total && !Object.keys(manualLinks).length) return '';
+
+  let html = `<div class="card">
+    <div class="card-title">🔁 Reposts &amp; Shares${total ? ` — ${total} found` : ''}</div>`;
+
+  if (rt.error && !total) {
+    html += `<div style="font-size:12px;color:var(--text2)">${escHtml(rt.error)}</div>`;
+  }
+
+  // Silent retweeters (Nitter)
+  if (retweeters.length) {
+    html += `<div style="margin-bottom:14px">
+      <div style="font-size:12px;font-weight:600;color:#1d9bf0;margin-bottom:8px;border-bottom:1px solid var(--border);padding-bottom:4px">
+        Silent Retweets — ${retweeters.length} account(s)
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">`;
+    for (const r of retweeters) {
+      html += `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:3px 8px;font-size:12px">
+        <a href="${escHtml(r.profile_url)}" target="_blank" style="color:var(--accent2)">@${escHtml(r.username)}</a>
+        ${investBtn(r.profile_url, r.username)}
+      </span>`;
+    }
+    html += '</div></div>';
+  }
+
+  // Quote tweets
+  if (quoteTweets.length) {
+    html += `<div style="margin-bottom:14px">
+      <div style="font-size:12px;font-weight:600;color:#1d9bf0;margin-bottom:8px;border-bottom:1px solid var(--border);padding-bottom:4px">
+        Quote Tweets — ${quoteTweets.length} found
+      </div>`;
+    for (const qt of quoteTweets) {
+      html += `<div style="padding:8px 0;border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+          <a href="https://x.com/${escHtml(qt.username)}" target="_blank" style="color:var(--accent2);font-weight:600;font-size:13px">@${escHtml(qt.username)}</a>
+          <a href="${escHtml(qt.tweet_url)}" target="_blank" style="color:var(--text2);font-size:11px">View tweet ↗</a>
+          ${investBtn(qt.tweet_url, qt.username)}
+        </div>
+        ${qt.snippet ? `<div style="font-size:12px;color:var(--text2);line-height:1.4">${escHtml(qt.snippet.slice(0,200))}</div>` : ''}
+      </div>`;
+    }
+    html += '</div>';
+  }
+
+  // Web shares (non-Twitter)
+  if (webShares.length) {
+    html += `<div style="margin-bottom:14px">
+      <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:8px;border-bottom:1px solid var(--border);padding-bottom:4px">
+        Web Shares — ${webShares.length} found
+      </div>`;
+    for (const ws of webShares) {
+      html += `<div style="padding:6px 0;border-bottom:1px solid var(--border)">
+        <a href="${escHtml(ws.url)}" target="_blank" style="color:var(--accent2);font-size:12px;font-weight:600">${escHtml((ws.title||ws.url).slice(0,80))}</a>
+        <span style="color:var(--text2);font-size:11px;margin-left:6px">${escHtml(ws.source||'')}</span>
+        ${ws.snippet ? `<div style="font-size:11px;color:var(--text2);margin-top:2px">${escHtml(ws.snippet.slice(0,150))}</div>` : ''}
+      </div>`;
+    }
+    html += '</div>';
+  }
+
+  // Manual search links (always shown)
+  if (Object.keys(manualLinks).length) {
+    html += `<div style="border-top:1px solid var(--border);padding-top:8px;margin-top:4px;display:flex;gap:8px;flex-wrap:wrap">
+      <span style="font-size:11px;color:var(--text2);align-self:center">Search manually:</span>`;
+    const labels = {twitter_search: 'X Quote Search', google_quotes: 'Google Search'};
+    for (const [k, url] of Object.entries(manualLinks)) {
+      html += `<a href="${escHtml(url)}" target="_blank" class="g-link" style="font-size:11px">${labels[k]||k} ↗</a>`;
+    }
+    html += '</div>';
+  }
+
+  html += '</div>';
+  return html;
+}
+
 function renderShareTrace(c) {
   const st = c.share_trace;
   if (!st || !st.platform) return '';
@@ -1392,6 +1476,7 @@ function renderPost(c) {
         <span class="kv-key">URL</span><span class="kv-val"><a href="${escHtml(p.url||'#')}" target="_blank">${escHtml(p.url||'–')}</a></span>
       </div>
     </div>
+    ${renderRepostTracker(c)}
     ${p.hashtags?.length ? `<div class="card"><div class="card-title">Hashtags</div><div style="font-size:13px">${p.hashtags.map(h=>`<span style="margin:2px;display:inline-block;background:var(--bg3);padding:2px 8px;border-radius:3px">#${escHtml(h)}</span>`).join('')}</div></div>` : ''}
     ${p.mentions?.length ? `<div class="card"><div class="card-title">Mentions</div><div style="font-size:13px">${p.mentions.map(m=>`<span style="margin:2px;display:inline-block;background:rgba(31,111,235,.1);padding:2px 8px;border-radius:3px;color:var(--accent2)">@${escHtml(m)}</span>`).join('')}</div></div>` : ''}
     ${p.embedded_urls?.length ? `<div class="card"><div class="card-title">Embedded URLs</div>${p.embedded_urls.map(u=>`<div style="margin:4px 0;font-size:13px"><a href="${escHtml(u)}" target="_blank">${escHtml(u)}</a></div>`).join('')}</div>` : ''}

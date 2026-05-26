@@ -61,6 +61,7 @@ class CaseManager:
                 _step("account",         "Account Profile"),
                 _step("account_history", "Account Timeline & Enrichment"),
                 _step("cross_posts",     "Cross-Post Detection"),
+                _step("repost_tracker",  "Repost / Quote-Tweet Tracker"),
                 _step("username",        "Username Enumeration"),
                 _step("dark_web",        "Dark Web Search"),
                 _step("media",           "Media Download & EXIF"),
@@ -383,6 +384,30 @@ def run_pipeline(case_id: str, manager: CaseManager):
                 manager.step_fail(case, "cross_posts", str(e))
         else:
             manager.step_skip(case, "cross_posts", "Disabled in config")
+
+        # ── Step 4b: Repost / Quote-tweet tracker ────────────────────────────
+        manager.step_start(case, "repost_tracker")
+        _log(case, "Searching for retweets, quote-tweets, and cross-platform shares…")
+        manager.save(case)
+        try:
+            if case.post and case.platform in ("twitter", "x"):
+                from backend.modules.repost_tracker import find_reposts
+                rp = find_reposts(case.post, config)
+                case.repost_tracker = rp
+                total = rp.get("total", 0)
+                parts = []
+                if rp.get("retweeters"):    parts.append(f"{len(rp['retweeters'])} retweeters")
+                if rp.get("quote_tweets"):  parts.append(f"{len(rp['quote_tweets'])} quote-tweets")
+                if rp.get("web_shares"):    parts.append(f"{len(rp['web_shares'])} web shares")
+                summary = ", ".join(parts) if parts else "none found"
+                if total:
+                    _log(case, f"Repost tracker: {summary}")
+                manager.step_done(case, "repost_tracker", summary if total else "No reposts found")
+            else:
+                manager.step_skip(case, "repost_tracker", "Only supported for Twitter/X posts")
+        except Exception as e:
+            case.errors.append(f"Repost tracker: {e}")
+            manager.step_fail(case, "repost_tracker", str(e))
 
         # ── Step 5: Username search (Sherlock) ───────────────────────────────
         if not config.get("skip_sherlock"):

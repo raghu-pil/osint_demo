@@ -184,6 +184,9 @@ class Case(BaseModel):
     # ShareTrace — who shared/forwarded this link
     share_trace: Optional[Dict[str, Any]] = None
 
+    # Repost tracker — who retweeted / quote-tweeted / shared this post
+    repost_tracker: Optional[Dict[str, Any]] = None
+
     # Media-first investigation results
     discovered_accounts: List[Dict[str, Any]] = []
     media_investigation: Optional[Dict[str, Any]] = None

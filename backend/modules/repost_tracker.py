@@ -227,9 +227,14 @@ def _serpapi_url_search(post_url: str, exclude_own_domain: str,
         return {"quote_tweets": quote_tweets, "web_shares": web_shares,
                 "error": "serpapi not installed"}
 
-    # Strip scheme for the search query so both http/https variants match
+    # Strip scheme; exclude source platform so results are external references
     clean_url = re.sub(r'^https?://(www\.)?', '', post_url).rstrip('/')
-    query = f'"{clean_url}"'
+    own_domain = re.sub(r'/.*', '', clean_url)   # e.g. "x.com"
+    # For x.com also exclude twitter.com (same content, different domain)
+    exclude = f'-site:{own_domain}'
+    if 'x.com' in own_domain or 'twitter.com' in own_domain:
+        exclude = '-site:x.com -site:twitter.com'
+    query = f'"{clean_url}" {exclude}'
 
     try:
         results = GoogleSearch({
@@ -306,11 +311,24 @@ def _manual_links(post_url: str, platform: str,
         f"&src=typed_query&f=live"
     )
 
-    # Google search for the URL
+    # Google: search for external pages referencing this URL (exclude the source platform)
     clean = re.sub(r'^https?://(www\.)?', '', post_url).rstrip('/')
-    links["google_search"] = f"https://www.google.com/search?q={quote_plus(clean)}"
+    if platform in ("twitter", "x"):
+        # Exclude x.com/twitter.com so results are articles/forums that reference the tweet
+        google_q = f'"{clean}" -site:x.com -site:twitter.com'
+    elif platform == "instagram":
+        google_q = f'"{clean}" -site:instagram.com'
+    elif platform == "facebook":
+        google_q = f'"{clean}" -site:facebook.com'
+    elif platform == "youtube":
+        google_q = f'"{clean}" -site:youtube.com -site:youtu.be'
+    elif platform == "tiktok":
+        google_q = f'"{clean}" -site:tiktok.com'
+    else:
+        google_q = f'"{clean}"'
+    links["google_search"] = f"https://www.google.com/search?q={quote_plus(google_q)}"
 
-    # Platform-specific extras
+    # X-specific: also search by tweet path (catches quote tweets Google indexed)
     if platform in ("twitter", "x") and tweet_id:
         links["x_quote_search"] = (
             f"https://x.com/search?q={quote_plus(username + '/status/' + tweet_id)}"

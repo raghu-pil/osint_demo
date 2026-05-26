@@ -328,13 +328,6 @@ def _manual_links(post_url: str, platform: str,
         google_q = f'"{clean}"'
     links["google_search"] = f"https://www.google.com/search?q={quote_plus(google_q)}"
 
-    # X-specific: also search by tweet path (catches quote tweets Google indexed)
-    if platform in ("twitter", "x") and tweet_id:
-        links["x_quote_search"] = (
-            f"https://x.com/search?q={quote_plus(username + '/status/' + tweet_id)}"
-            f"&src=typed_query&f=live"
-        )
-
     return links
 
 

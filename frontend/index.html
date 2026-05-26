@@ -1392,11 +1392,10 @@ function renderRepostTracker(c) {
   if (Object.keys(manualLinks).length) {
     const noAuto = !retweeters.length && !quoteTweets.length;
     const labels = {
-      x_url_search:    '🔍 Find X posts sharing this URL',
-      x_quote_search:  '🔍 X Quote Search',
-      google_search:   '🌐 Find web articles referencing this',
-      twitter_search:  '🔍 Find X posts sharing this URL',
-      google_quotes:   '🌐 Find web articles referencing this',
+      x_url_search:   '🔍 Find X posts sharing this URL',
+      google_search:  '🌐 Find web articles referencing this',
+      twitter_search: '🔍 Find X posts sharing this URL',
+      google_quotes:  '🌐 Find web articles referencing this',
     };
     html += `<div style="border-top:1px solid var(--border);padding-top:10px;margin-top:4px">
       ${noAuto ? `<div style="font-size:12px;color:var(--text2);margin-bottom:8px">Open while logged into X to find who shared this:</div>` : `<div style="font-size:11px;color:var(--text2);margin-bottom:6px">Search manually:</div>`}

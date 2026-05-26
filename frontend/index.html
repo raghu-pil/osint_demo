@@ -1343,13 +1343,18 @@ function renderRepostTracker(c) {
         Quote Tweets — ${quoteTweets.length} found
       </div>`;
     for (const qt of quoteTweets) {
+      const srcLabel = {'twitter_api_v2':'Twitter API','nitter_search':'Nitter','serpapi_google':'Google'}[qt.source] || qt.source || '';
       html += `<div style="padding:8px 0;border-bottom:1px solid var(--border)">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
           <a href="https://x.com/${escHtml(qt.username)}" target="_blank" style="color:var(--accent2);font-weight:600;font-size:13px">@${escHtml(qt.username)}</a>
           <a href="${escHtml(qt.tweet_url)}" target="_blank" style="color:var(--text2);font-size:11px">View tweet ↗</a>
+          ${srcLabel ? `<span style="font-size:10px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;padding:1px 5px;color:var(--text2)">${escHtml(srcLabel)}</span>` : ''}
+          ${qt.metrics?.retweet_count ? `<span style="font-size:11px;color:var(--text2)">🔁 ${qt.metrics.retweet_count}</span>` : ''}
+          ${qt.metrics?.like_count ? `<span style="font-size:11px;color:var(--text2)">❤ ${qt.metrics.like_count}</span>` : ''}
           ${investBtn(qt.tweet_url, qt.username)}
         </div>
         ${qt.snippet ? `<div style="font-size:12px;color:var(--text2);line-height:1.4">${escHtml(qt.snippet.slice(0,200))}</div>` : ''}
+        ${qt.created_at ? `<div style="font-size:10px;color:var(--text2);margin-top:2px">${new Date(qt.created_at).toLocaleString()}</div>` : ''}
       </div>`;
     }
     html += '</div>';
@@ -1371,15 +1376,33 @@ function renderRepostTracker(c) {
     html += '</div>';
   }
 
-  // Manual search links (always shown)
+  // Twitter API tier warning
+  if (rt.twitter_api_warning) {
+    html += `<div style="background:rgba(255,170,0,.08);border:1px solid rgba(255,170,0,.3);border-radius:4px;padding:8px 10px;margin-bottom:10px;font-size:11px;color:#ffaa00">
+      ⚠ Twitter API: ${escHtml(rt.twitter_api_warning)}
+    </div>`;
+  }
+
+  // Manual search links — always shown, prominent when API unavailable
   if (Object.keys(manualLinks).length) {
-    html += `<div style="border-top:1px solid var(--border);padding-top:8px;margin-top:4px;display:flex;gap:8px;flex-wrap:wrap">
-      <span style="font-size:11px;color:var(--text2);align-self:center">Search manually:</span>`;
-    const labels = {twitter_search: 'X Quote Search', google_quotes: 'Google Search'};
+    const noAuto = !retweeters.length && !quoteTweets.length;
+    html += `<div style="border-top:1px solid var(--border);padding-top:10px;margin-top:4px">
+      ${noAuto ? `<div style="font-size:12px;color:var(--text2);margin-bottom:8px">Automated detection unavailable — use these links while logged into X to find reposts:</div>` : `<div style="font-size:11px;color:var(--text2);margin-bottom:6px">Search manually:</div>`}
+      <div style="display:flex;gap:8px;flex-wrap:wrap">`;
+    const labels = {
+      twitter_search: '🔍 Search on X (open while logged in)',
+      google_quotes:  '🌐 Google search',
+    };
     for (const [k, url] of Object.entries(manualLinks)) {
-      html += `<a href="${escHtml(url)}" target="_blank" class="g-link" style="font-size:11px">${labels[k]||k} ↗</a>`;
+      const isX = k === 'twitter_search';
+      html += `<a href="${escHtml(url)}" target="_blank" style="
+        display:inline-flex;align-items:center;gap:4px;
+        background:${isX ? 'rgba(29,155,240,.15)' : 'var(--bg3)'};
+        border:1px solid ${isX ? 'rgba(29,155,240,.4)' : 'var(--border)'};
+        border-radius:4px;padding:5px 10px;font-size:12px;color:${isX ? '#1d9bf0' : 'var(--text2)'};
+        text-decoration:none" target="_blank">${labels[k]||k} ↗</a>`;
     }
-    html += '</div>';
+    html += '</div></div>';
   }
 
   html += '</div>';

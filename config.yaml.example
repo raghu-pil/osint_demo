@@ -1,0 +1,84 @@
+# authintify — OSINT Investigation Tool
+# Copy this file to config.yaml and fill in your API keys.
+#
+#   cp config.yaml.example config.yaml
+#
+# All keys are optional. The tool works without them but with reduced capability.
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+
+storage:
+  cases_dir: "cases"
+
+# ── Social platforms ──────────────────────────────────────────────────────────
+
+# Twitter/X bearer token — without this, falls back to fxtwitter (no auth)
+# Get at: https://developer.twitter.com/en/portal/dashboard
+twitter_bearer_token: ""
+
+# Nitter instance (self-hosted or public) — improves Twitter scraping
+# e.g. http://localhost:8081
+nitter_instance: ""
+
+# YouTube Data API v3
+# Get at: https://console.developers.google.com
+youtube_api_key: ""
+
+# ── Breach / identity ─────────────────────────────────────────────────────────
+
+# Have I Been Pwned — $3.50/month — https://haveibeenpwned.com/API/Key
+hibp_api_key: ""
+
+# Dehashed — $5/month — https://dehashed.com (full breach records)
+dehashed_api_key: ""
+dehashed_email: ""
+
+# IntelligenceX — free tier available — https://intelx.io/account?tab=developer
+intelx_api_key: ""
+
+# ── Search ────────────────────────────────────────────────────────────────────
+
+# SerpAPI — free tier: 100 searches/month — https://serpapi.com
+# Required for: reverse image search (Google Lens + Yandex), repost detection
+serpapi_api_key: ""
+
+# SearXNG self-hosted metasearch — improves cross-post detection
+searxng_url: ""
+
+# DarkSearch — removes 10/day rate limit — https://darksearch.io
+darksearch_api_key: ""
+
+# ── LLM analysis ─────────────────────────────────────────────────────────────
+
+# Claude API key — used for post/image intelligence analysis
+# Get at: https://console.anthropic.com
+anthropic_api_key: ""
+
+llm:
+  enabled: false
+  provider: "anthropic"     # anthropic | openai | ollama
+  model: "claude-sonnet-4-6"
+  ollama_base_url: "http://localhost:11434"
+
+# ── Authentify deepfake detection ─────────────────────────────────────────────
+# Token from browser DevTools after login at https://authentify.pi-labs.ai
+# Expires ~12h — paste a fresh one here, no restart needed
+authentify:
+  auth_token: ""
+  report_api_key: ""
+  inference_client_id: "authentify-inference"
+  inference_client_secret: ""
+  owner_id: ""
+
+# ── Tor (dark web) ────────────────────────────────────────────────────────────
+tor_proxy: "socks5h://127.0.0.1:9050"
+
+# ── Feature flags ─────────────────────────────────────────────────────────────
+skip_sherlock: false
+skip_darkweb: false
+skip_crossposts: false
+skip_media_download: false
+
+sherlock_timeout: 60

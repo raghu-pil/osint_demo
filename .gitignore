@@ -9,6 +9,7 @@ cases/
 
 # Sherlock output files
 *.txt
+!requirements.txt
 
 # Temporary test files
 InsiderWB.txt

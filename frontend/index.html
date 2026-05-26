@@ -814,7 +814,28 @@ function renderTabContent(c, tab) {
     case 'post':     el.innerHTML = renderPost(c); break;
     case 'account':  el.innerHTML = renderAccount(c); break;
     case 'timeline': el.innerHTML = renderTimeline(c); break;
-    case 'media':    el.innerHTML = renderMedia(c); break;
+    case 'media': {
+      // Snapshot any keyframe containers that the user has already expanded,
+      // re-render the media tab, then restore them so the poll doesn't wipe them.
+      const _kfSnapshots = {};
+      el.querySelectorAll('[id^="kf_"]').forEach(n => {
+        if (n.querySelector('img')) _kfSnapshots[n.id] = n.innerHTML;
+      });
+      const _rsSnapshots = {};
+      el.querySelectorAll('[id^="rs_result_kf_"]').forEach(n => {
+        if (n.innerHTML.trim()) _rsSnapshots[n.id] = n.innerHTML;
+      });
+      el.innerHTML = renderMedia(c);
+      Object.entries(_kfSnapshots).forEach(([id, html]) => {
+        const node = document.getElementById(id);
+        if (node) node.innerHTML = html;
+      });
+      Object.entries(_rsSnapshots).forEach(([id, html]) => {
+        const node = document.getElementById(id);
+        if (node) node.innerHTML = html;
+      });
+      break;
+    }
     case 'identity': el.innerHTML = renderIdentity(c); break;
     case 'network':  el.innerHTML = renderNetwork(c); break;
     case 'darkweb':  el.innerHTML = renderDarkweb(c); break;

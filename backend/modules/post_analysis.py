@@ -40,6 +40,11 @@ Analyse this and return a JSON object with these fields:
     "Specific search query to verify claim 2",
     "YouTube query to find original footage if video",
     "News site query to cross-check"
+  ],
+  "is_factcheck_post": true,
+  "disinformation_source_queries": [
+    "Search query using the FAKE claim's keywords to find who originally spread it on Twitter/X",
+    "Another angle on the same fake claim to catch reshares or quote-tweets"
   ]
 }}
 
@@ -47,6 +52,8 @@ Rules:
 - Be factual and concise. Do not speculate beyond what the data shows.
 - If the post text is in a language other than English, translate it and note the language.
 - verification_queries should be specific and actionable, not generic.
+- is_factcheck_post: set true if this post is by a fact-checker debunking a fake claim, false otherwise.
+- disinformation_source_queries: ONLY populate if is_factcheck_post is true. Generate 2-3 search queries using the keywords of the FAKE/debunked claim (not the fact-check itself) that would surface who originally spread the fake content on social media. Do NOT include the fact-checker's own username. Keep queries short and focused on the false claim's distinctive wording.
 - Return ONLY the JSON object, no markdown."""
 
 

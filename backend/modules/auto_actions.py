@@ -432,6 +432,74 @@ def generic_page_scrape(platform: str, url: str) -> Dict:
     return result
 
 
+# ── Disinformation source finder ─────────────────────────────────────────────
+
+_SKIP_HANDLES = frozenset({
+    "search", "hashtag", "i", "home", "explore", "notifications",
+    "messages", "settings", "intent", "share",
+})
+
+def find_disinfo_source(post_intelligence: dict, author_username: str,
+                        serpapi_key: str) -> Dict[str, Any]:
+    """
+    When the investigated post is a fact-check, search for the accounts
+    that originally spread the fake/debunked content.
+    Uses LLM-generated disinformation_source_queries via SerpAPI Google.
+    """
+    queries = post_intelligence.get("disinformation_source_queries") or []
+    if not queries or not serpapi_key:
+        return {"found": False, "accounts": [], "queries_run": []}
+
+    try:
+        from serpapi import GoogleSearch
+    except ImportError:
+        return {"found": False, "error": "serpapi not installed", "accounts": []}
+
+    author_lc = (author_username or "").lower()
+    found: Dict[str, dict] = {}
+
+    for query in queries[:3]:
+        try:
+            results = GoogleSearch({
+                "engine": "google",
+                "q": f"{query} site:x.com OR site:twitter.com",
+                "api_key": serpapi_key,
+                "num": 10,
+            }).get_dict()
+
+            for item in results.get("organic_results", []):
+                link  = item.get("link", "")
+                title = item.get("title", "")
+                snippet = item.get("snippet", "")
+
+                m = re.search(
+                    r'(?:twitter|x)\.com/([A-Za-z0-9_]{1,50})/status/(\d+)',
+                    link,
+                )
+                if not m:
+                    continue
+                uname = m.group(1).lower()
+                tweet_id = m.group(2)
+                if uname in _SKIP_HANDLES or uname == author_lc:
+                    continue
+                if uname not in found:
+                    found[uname] = {
+                        "username":  m.group(1),
+                        "tweet_url": link,
+                        "tweet_id":  tweet_id,
+                        "context":   (snippet or title)[:250],
+                        "found_via": query,
+                    }
+        except Exception as e:
+            logger.warning("disinfo source search query %r failed: %s", query, e)
+
+    return {
+        "found": bool(found),
+        "accounts": list(found.values()),
+        "queries_run": queries[:3],
+    }
+
+
 # ── Main orchestrator ─────────────────────────────────────────────────────────
 
 def run_all_auto_actions(case, serpapi_key: str = "", case_dir: str = "") -> Dict[str, Any]:
@@ -456,6 +524,14 @@ def run_all_auto_actions(case, serpapi_key: str = "", case_dir: str = "") -> Dic
         mf_dict = mf.model_dump() if hasattr(mf, 'model_dump') else mf
         action_id = f"reverse_search_{mf_dict.get('filename', 'media')}"
         results[action_id] = run_reverse_search(mf_dict, serpapi_key=serpapi_key, case_dir=case_dir)
+        time.sleep(0.5)
+
+    # 1b. Find original disinformation source (fact-check posts only)
+    pi = getattr(case, "post_intelligence", None) or {}
+    if isinstance(pi, dict) and pi.get("is_factcheck_post") and serpapi_key:
+        results["disinfo_source_search"] = find_disinfo_source(
+            pi, username or "", serpapi_key
+        )
         time.sleep(0.5)
 
     # 2. Twitter following list

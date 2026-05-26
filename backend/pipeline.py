@@ -706,6 +706,36 @@ def run_pipeline(case_id: str, manager: CaseManager):
                     auto_status="done",
                 ))
 
+            # Disinformation source search results → new guidance items
+            disinfo = auto_results.get("disinfo_source_search", {})
+            if disinfo.get("found"):
+                for acct in disinfo.get("accounts", []):
+                    uname = acct.get("username", "?")
+                    tweet_url = acct.get("tweet_url", "")
+                    context = acct.get("context", "")
+                    found_via = acct.get("found_via", "")
+                    case.guidance.insert(0, GuidanceItem(
+                        priority=1,
+                        severity="critical",
+                        title=f"Possible disinformation source: @{uname}",
+                        detail=(
+                            f"Account @{uname} was found spreading content matching the fake claim "
+                            f"being debunked. Context: {context[:200]}"
+                            + (f"\nFound via query: \"{found_via}\"" if found_via else "")
+                        ),
+                        action=(
+                            f"Investigate @{uname} — run a full investigation on their profile "
+                            "to establish whether they are the origin or a resharer of the fake content."
+                        ),
+                        pivot_url=tweet_url or f"https://x.com/{uname}",
+                        pivot_label=f"Open @{uname} tweet",
+                        category="network",
+                        auto_result=acct,
+                        auto_status="done",
+                    ))
+                _log(case, f"Found {len(disinfo['accounts'])} potential disinformation source account(s): "
+                     + ", ".join(f"@{a['username']}" for a in disinfo['accounts']))
+
             n_done = sum(1 for v in auto_results.values() if not v.get("error"))
             manager.step_done(case, "auto_actions",
                 f"{len(auto_results)} actions run, {n_done} successful")

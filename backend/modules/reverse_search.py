@@ -417,7 +417,9 @@ def run_reverse_search_for_media(
         if not frames:
             result["error"] = "No keyframes extracted (ffmpeg required for video)"
             return result
-        search_paths = frames
+        # Only search the first keyframe automatically — additional frames
+        # can be searched on demand by clicking them in the Media tab.
+        search_paths = frames[:1]
 
     elif media_type == "audio":
         result["error"] = "Reverse search not applicable to audio files"
@@ -438,10 +440,22 @@ def run_reverse_search_for_media(
         result["frames_searched"].append(frame_info)
         all_matches.extend(frame_result.get("matches", []))
 
-    result["all_matches"] = all_matches
+    # Deduplicate by URL across frames — the same page appearing in
+    # multiple keyframe searches is one hit, not N.
+    seen_links: set = set()
+    deduped = []
+    for m in all_matches:
+        key = m.get("link") or m.get("thumbnail") or ""
+        if key and key not in seen_links:
+            seen_links.add(key)
+            deduped.append(m)
+        elif not key:
+            deduped.append(m)
+
+    result["all_matches"] = deduped
 
     # Find overall earliest match
-    for m in all_matches:
+    for m in deduped:
         if m.get("date"):
             if result["earliest_match"] is None or m["date"] < result["earliest_match"]["date"]:
                 result["earliest_match"] = m

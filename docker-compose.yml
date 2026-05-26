@@ -4,8 +4,6 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      # Config file — edit this before starting (copy from config.yaml.example)
-      - ./config.yaml:/app/config.yaml
       # Persistent case storage — all investigations saved here
       - ./cases:/app/cases
     restart: unless-stopped
